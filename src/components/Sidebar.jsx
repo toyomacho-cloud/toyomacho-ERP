@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Package, Settings, LogOut, ClipboardList, ShoppingCart, ArrowRightLeft, X, Building2, Mail, FileSpreadsheet, Scale, ChevronDown, Boxes, RefreshCw, Users, DollarSign, AlertTriangle, Wallet } from 'lucide-react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
 
@@ -12,39 +11,52 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
     const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
     const [expandedMenus, setExpandedMenus] = useState(['inventoryManagement']);
 
-    // Subscribe to unread mail count
+    // Subscribe to unread mail count (using Supabase)
     useEffect(() => {
         if (!currentCompany?.id || !userProfile?.uid) return;
 
-        const mailQuery = query(
-            collection(db, 'internalMail'),
-            where('companyId', '==', currentCompany.id),
-            where('to.uid', '==', userProfile.uid),
-            where('read', '==', false)
-        );
+        // Initial fetch
+        const fetchUnreadCount = async () => {
+            const { count } = await supabase
+                .from('internal_mail')
+                .select('*', { count: 'exact', head: true })
+                .eq('company_id', currentCompany.id)
+                .eq('to_uid', userProfile.uid)
+                .eq('read', false);
+            setUnreadCount(count || 0);
+        };
+        fetchUnreadCount();
 
-        const unsubscribe = onSnapshot(mailQuery, (snapshot) => {
-            setUnreadCount(snapshot.docs.length);
-        });
+        // Real-time subscription
+        const channel = supabase
+            .channel('sidebar_mail_count')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'internal_mail' }, fetchUnreadCount)
+            .subscribe();
 
-        return () => unsubscribe();
+        return () => supabase.removeChannel(channel);
     }, [currentCompany?.id, userProfile?.uid]);
 
-    // Subscribe to pending payments count
+    // Subscribe to pending payments count (using Supabase)
     useEffect(() => {
         if (!currentCompany?.id) return;
 
-        const salesQuery = query(
-            collection(db, 'sales'),
-            where('companyId', '==', currentCompany.id),
-            where('paymentStatus', '==', 'pending_payment')
-        );
+        const fetchPendingCount = async () => {
+            const { count } = await supabase
+                .from('sales')
+                .select('*', { count: 'exact', head: true })
+                .eq('company_id', currentCompany.id)
+                .eq('payment_status', 'pending_payment');
+            setPendingPaymentsCount(count || 0);
+        };
+        fetchPendingCount();
 
-        const unsubscribe = onSnapshot(salesQuery, (snapshot) => {
-            setPendingPaymentsCount(snapshot.docs.length);
-        });
+        // Real-time subscription
+        const channel = supabase
+            .channel('sidebar_sales_count')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, fetchPendingCount)
+            .subscribe();
 
-        return () => unsubscribe();
+        return () => supabase.removeChannel(channel);
     }, [currentCompany?.id]);
 
     const handleLogout = async () => {
