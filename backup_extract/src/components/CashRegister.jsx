@@ -1,0 +1,1298 @@
+
+import {
+    Wallet,
+    Clock,
+    AlertCircle,
+    CheckCircle,
+    XCircle,
+    DollarSign,
+    CreditCard,
+    Smartphone,
+    Building,
+    FileText,
+    ArrowDownCircle,
+    ArrowUpCircle,
+    RotateCcw,
+    Printer,
+    Download,
+    Bell,
+    ChevronRight,
+    Search,
+    Filter,
+    X,
+    Plus,
+    Minus,
+    RefreshCw,
+    Edit,
+    Trash2
+} from 'lucide-react';
+import jsPDF from 'jspdf';
+
+// ... (rest of imports)
+
+
+
+
+// Payment Method Icons and Labels
+const PAYMENT_METHODS = {
+    cash_usd: { label: 'Efectivo USD', icon: DollarSign, currency: 'USD' },
+    cash_bs: { label: 'Efectivo Bs', icon: DollarSign, currency: 'Bs' },
+    punto: { label: 'Punto de Venta', icon: CreditCard, currency: 'USD', requiresRef: true },
+    transfer_usd: { label: 'Transferencia USD', icon: Building, currency: 'USD', requiresRef: true },
+    transfer_bs: { label: 'Transferencia Bs', icon: Building, currency: 'Bs', requiresRef: true },
+    zelle: { label: 'Zelle', icon: Smartphone, currency: 'USD', requiresRef: true },
+    pago_movil: { label: 'Pago Móvil', icon: Smartphone, currency: 'Bs', requiresRef: true }
+};
+
+const CashRegister = ({ onNavigate }) => {
+    const { currentUser, userProfile } = useAuth();
+    const {
+        sales,
+        customers,
+        cashSession,
+        cashTransactions,
+        authRequests,
+        creditNotes,
+        openCashSession,
+        closeCashSession,
+        verifyCashSession,
+        processSalePayment,
+        processExpense,
+        processWithdrawal,
+        approveAuthorization,
+        rejectAuthorization,
+        processReturn,
+        getPendingSales,
+        cancelSale
+    } = useInventory(userProfile?.companyId);
+
+    // Tabs
+    const [activeTab, setActiveTab] = useState('pending');
+
+    // Modals
+    const [showOpeningModal, setShowOpeningModal] = useState(false);
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [showExpenseModal, setShowExpenseModal] = useState(false);
+    const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
+    const [showReturnModal, setShowReturnModal] = useState(false);
+    const [showXReportModal, setShowXReportModal] = useState(false);
+    const [showZReportModal, setShowZReportModal] = useState(false);
+
+    // Selected items
+    const [selectedSale, setSelectedSale] = useState(null);
+
+    // Opening balance
+    const [openingUSD, setOpeningUSD] = useState('');
+    const [openingBs, setOpeningBs] = useState('');
+
+    // Payment processing
+    const [paymentMethods, setPaymentMethods] = useState([]);
+    const [exchangeRate, setExchangeRate] = useState(36.5);
+
+    // Search
+    const [searchTerm, setSearchTerm] = useState('');
+    const [confirmDeleteSale, setConfirmDeleteSale] = useState(null);
+
+    const handleEditPendingSale = async (sale, e) => {
+        e.stopPropagation();
+        if (window.confirm('¿Editar este pedido? Se cargará en el POS y se eliminará de pendientes.')) {
+            try {
+                const cartItems = sale.items.map(item => ({
+                    ...item,
+                    qty: item.quantity,
+                    priceUSD: item.price,
+                }));
+
+                localStorage.setItem('nova_cart', JSON.stringify(cartItems));
+                localStorage.setItem('nova_pos_mode', sale.isQuote ? 'quote' : 'sale');
+
+                await cancelSale(sale.id);
+                onNavigate('pos');
+            } catch (error) {
+                console.error('Error editing sale:', error);
+                alert('Error al editar pedido');
+            }
+        }
+    };
+
+    const handleDeletePendingSale = async (saleId, e) => {
+        e.stopPropagation();
+        if (confirmDeleteSale === saleId) {
+            try {
+                await cancelSale(saleId);
+                setConfirmDeleteSale(null);
+            } catch (error) {
+                console.error('Error deleting sale:', error);
+                alert('Error al eliminar pedido');
+            }
+        } else {
+            setConfirmDeleteSale(saleId);
+            setTimeout(() => setConfirmDeleteSale(null), 3000);
+        }
+    };
+
+    // Get pending sales
+    const pendingSales = useMemo(() => {
+        return sales.filter(s =>
+            s.paymentStatus === 'pending_payment' ||
+            s.paymentStatus === 'partial'
+        ).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }, [sales]);
+
+    // Get today's transactions
+    const todayTransactions = useMemo(() => {
+        if (!cashSession) return [];
+        return cashTransactions.filter(tx => tx.sessionId === cashSession.id);
+    }, [cashTransactions, cashSession]);
+
+    // Calculate session totals
+    const sessionTotals = useMemo(() => {
+        const totals = {
+            salesCount: 0,
+            salesTotal: 0,
+            expensesTotal: 0,
+            withdrawalsTotal: 0,
+            returnsTotal: 0,
+            byMethod: {}
+        };
+
+        todayTransactions.forEach(tx => {
+            if (tx.type === 'sale') {
+                totals.salesCount++;
+                totals.salesTotal += tx.totalAmount || 0;
+
+                tx.payments?.forEach(p => {
+                    const key = p.method;
+                    if (!totals.byMethod[key]) {
+                        totals.byMethod[key] = { amount: 0, currency: p.currency };
+                    }
+                    totals.byMethod[key].amount += p.amount;
+                });
+            } else if (tx.type === 'expense') {
+                totals.expensesTotal += tx.totalAmount || 0;
+            } else if (tx.type === 'withdrawal') {
+                totals.withdrawalsTotal += tx.totalAmount || 0;
+            } else if (tx.type === 'return') {
+                totals.returnsTotal += tx.totalAmount || 0;
+            }
+        });
+
+        return totals;
+    }, [todayTransactions]);
+
+    // Filter pending sales by search
+    const filteredPendingSales = useMemo(() => {
+        if (!searchTerm) return pendingSales;
+        const term = searchTerm.toLowerCase();
+        return pendingSales.filter(s =>
+            s.documentNumber?.toLowerCase().includes(term) ||
+            s.customer?.name?.toLowerCase().includes(term) ||
+            s.sku?.toLowerCase().includes(term)
+        );
+    }, [pendingSales, searchTerm]);
+
+    // Check if user can verify (admin_finance or president)
+    const canVerify = userProfile?.role === 'admin_finance' || userProfile?.role === 'president' || userProfile?.role === 'admin';
+
+    // Handle opening cash session
+    const handleOpenSession = async () => {
+        try {
+            await openCashSession(
+                { USD: parseFloat(openingUSD) || 0, Bs: parseFloat(openingBs) || 0 },
+                currentUser.uid,
+                userProfile?.displayName || currentUser.email
+            );
+            setShowOpeningModal(false);
+            setOpeningUSD('');
+            setOpeningBs('');
+        } catch (error) {
+            alert('Error al abrir caja: ' + error.message);
+        }
+    };
+
+    // Handle payment processing
+    const handleProcessPayment = async () => {
+        if (!selectedSale || paymentMethods.length === 0) return;
+
+        try {
+            const result = await processSalePayment(
+                selectedSale.id,
+                paymentMethods,
+                currentUser.uid,
+                userProfile?.displayName || currentUser.email,
+                exchangeRate
+            );
+
+            if (result.success) {
+                // Generate PDF receipt
+                generatePaymentReceipt(selectedSale, paymentMethods, result.isPaid);
+
+                setShowPaymentModal(false);
+                setSelectedSale(null);
+                setPaymentMethods([]);
+            }
+        } catch (error) {
+            alert('Error al procesar pago: ' + error.message);
+        }
+    };
+
+    // Generate payment receipt PDF
+    const generatePaymentReceipt = (sale, payments, isPaid) => {
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+
+        // Header
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.text('REPUESTOS TOYOTA, C.A.', pageWidth / 2, 20, { align: 'center' });
+
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'normal');
+        doc.text('RIF: J-00000000-0', pageWidth / 2, 28, { align: 'center' });
+
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`RECIBO DE ${isPaid ? 'PAGO' : 'ABONO'}`, pageWidth / 2, 40, { align: 'center' });
+
+        // Document info
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Documento: ${sale.documentType === 'factura' ? 'Factura' : 'Pedido'} #${sale.documentNumber}`, 20, 55);
+        doc.text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, 20, 62);
+        doc.text(`Hora: ${new Date().toLocaleTimeString('es-VE')}`, 20, 69);
+
+        // Customer
+        if (sale.customer) {
+            doc.text(`Cliente: ${sale.customer.name}`, 20, 80);
+            doc.text(`RIF/CI: ${sale.customer.rif || 'N/A'}`, 20, 87);
+        }
+
+        // Payment details
+        let y = 100;
+        doc.setFont('helvetica', 'bold');
+        doc.text('DETALLE DE PAGO:', 20, y);
+        y += 10;
+
+        doc.setFont('helvetica', 'normal');
+        payments.forEach(p => {
+            const method = PAYMENT_METHODS[p.method];
+            const line = `${method?.label || p.method}: $${p.amount.toFixed(2)}`;
+            doc.text(line, 25, y);
+            if (p.reference) {
+                doc.text(`   Ref: ${p.reference}`, 25, y + 5);
+                y += 5;
+            }
+            y += 7;
+        });
+
+        // Total
+        const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+        y += 5;
+        doc.setFont('helvetica', 'bold');
+        doc.text(`TOTAL PAGADO: $${totalPaid.toFixed(2)}`, 20, y);
+
+        if (!isPaid) {
+            y += 10;
+            doc.setTextColor(255, 0, 0);
+            doc.text(`PENDIENTE: $${(sale.amountUSD - totalPaid).toFixed(2)}`, 20, y);
+            doc.setTextColor(0, 0, 0);
+        }
+
+        // Footer
+        doc.setFontSize(8);
+        doc.text('Gracias por su compra', pageWidth / 2, 270, { align: 'center' });
+
+        // Save
+        doc.save(`Recibo_${sale.documentNumber}_${Date.now()}.pdf`);
+    };
+
+    // Add payment method
+    const addPaymentMethod = (method) => {
+        setPaymentMethods([...paymentMethods, {
+            method,
+            amount: 0,
+            currency: PAYMENT_METHODS[method].currency,
+            reference: '',
+            bank: ''
+        }]);
+    };
+
+    // Update payment amount
+    const updatePaymentAmount = (index, amount) => {
+        const updated = [...paymentMethods];
+        updated[index].amount = parseFloat(amount) || 0;
+        setPaymentMethods(updated);
+    };
+
+    // Update payment reference
+    const updatePaymentReference = (index, reference) => {
+        const updated = [...paymentMethods];
+        updated[index].reference = reference;
+        setPaymentMethods(updated);
+    };
+
+    // Remove payment method
+    const removePaymentMethod = (index) => {
+        setPaymentMethods(paymentMethods.filter((_, i) => i !== index));
+    };
+
+    // Calculate total payment
+    const totalPayment = useMemo(() => {
+        return paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0);
+    }, [paymentMethods]);
+
+    // Calculate remaining for selected sale
+    const remainingAmount = useMemo(() => {
+        if (!selectedSale) return 0;
+        return (selectedSale.amountUSD || 0) - (selectedSale.paidAmount || 0);
+    }, [selectedSale]);
+
+    // If no cash session, show opening modal or pending verification
+    if (!cashSession) {
+        return (
+            <div className="animate-fade-in" style={{ padding: '2rem' }}>
+                <div className="glass-panel" style={{
+                    maxWidth: '500px',
+                    margin: '0 auto',
+                    padding: '2rem',
+                    textAlign: 'center'
+                }}>
+                    <Wallet size={64} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
+                    <h2 style={{ marginBottom: '1rem' }}>No hay caja abierta</h2>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                        Debe abrir caja para comenzar a procesar pagos
+                    </p>
+                    <button
+                        className="btn btn-primary"
+                        onClick={() => setShowOpeningModal(true)}
+                        style={{ padding: '0.75rem 2rem' }}
+                    >
+                        <Plus size={18} /> Abrir Caja
+                    </button>
+                </div>
+
+                {/* Opening Modal */}
+                {showOpeningModal && (
+                    <div className="modal-overlay" style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1000
+                    }}>
+                        <div className="glass-panel" style={{
+                            width: '90%',
+                            maxWidth: '400px',
+                            padding: '1.5rem'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <Wallet size={20} /> Apertura de Caja
+                                </h3>
+                                <button
+                                    onClick={() => setShowOpeningModal(false)}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            <div style={{ marginBottom: '1rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                                    Efectivo USD Inicial
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }}>$</span>
+                                    <input
+                                        type="number"
+                                        value={openingUSD}
+                                        onChange={(e) => setOpeningUSD(e.target.value)}
+                                        placeholder="0.00"
+                                        className="form-input"
+                                        style={{ paddingLeft: '28px', width: '100%' }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                                    Efectivo Bs Inicial
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }}>Bs</span>
+                                    <input
+                                        type="number"
+                                        value={openingBs}
+                                        onChange={(e) => setOpeningBs(e.target.value)}
+                                        placeholder="0.00"
+                                        className="form-input"
+                                        style={{ paddingLeft: '32px', width: '100%' }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={() => setShowOpeningModal(false)}
+                                    style={{ flex: 1 }}
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={handleOpenSession}
+                                    style={{ flex: 1 }}
+                                >
+                                    <CheckCircle size={16} /> Abrir Caja
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // Main Cash Register View
+    return (
+        <div className="animate-fade-in" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Header */}
+            <header style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                    <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Wallet size={28} /> Caja
+                    </h1>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <CheckCircle size={14} style={{ color: '#22c55e' }} />
+                        Turno Abierto - {cashSession.cashierName} (Desde {new Date(cashSession.openedAt).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })})
+                    </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        className="btn btn-secondary"
+                        onClick={() => setShowXReportModal(true)}
+                    >
+                        <FileText size={16} /> Reporte X
+                    </button>
+                    <button
+                        className="btn btn-primary"
+                        onClick={() => setShowZReportModal(true)}
+                    >
+                        <FileText size={16} /> Cerrar Caja (Z)
+                    </button>
+                </div>
+            </header>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                <button
+                    className={`btn ${activeTab === 'pending' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setActiveTab('pending')}
+                    style={{ position: 'relative' }}
+                >
+                    <Clock size={16} /> Pendientes
+                    {pendingSales.length > 0 && (
+                        <span style={{
+                            position: 'absolute',
+                            top: '-5px',
+                            right: '-5px',
+                            background: '#ef4444',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '20px',
+                            height: '20px',
+                            fontSize: '0.7rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}>
+                            {pendingSales.length}
+                        </span>
+                    )}
+                </button>
+                <button
+                    className={`btn ${activeTab === 'expenses' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setActiveTab('expenses')}
+                >
+                    <ArrowUpCircle size={16} /> Gastos
+                </button>
+                <button
+                    className={`btn ${activeTab === 'returns' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setActiveTab('returns')}
+                >
+                    <RotateCcw size={16} /> Devoluciones
+                </button>
+                <button
+                    className={`btn ${activeTab === 'history' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setActiveTab('history')}
+                >
+                    <FileText size={16} /> Historial
+                </button>
+                {canVerify && authRequests.length > 0 && (
+                    <button
+                        className={`btn ${activeTab === 'authorizations' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setActiveTab('authorizations')}
+                        style={{ position: 'relative' }}
+                    >
+                        <Bell size={16} /> Autorizaciones
+                        <span style={{
+                            position: 'absolute',
+                            top: '-5px',
+                            right: '-5px',
+                            background: '#f59e0b',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '20px',
+                            height: '20px',
+                            fontSize: '0.7rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}>
+                            {authRequests.length}
+                        </span>
+                    </button>
+                )}
+            </div>
+
+            {/* Main Content */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '1rem', flex: 1, minHeight: 0 }}>
+                {/* Left Panel - Content based on tab */}
+                <div className="glass-panel" style={{ padding: '1rem', overflow: 'auto' }}>
+                    {activeTab === 'pending' && (
+                        <>
+                            {/* Search */}
+                            <div style={{ marginBottom: '1rem', position: 'relative' }}>
+                                <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                                <input
+                                    type="text"
+                                    placeholder="Buscar por # documento, cliente..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="form-input"
+                                    style={{ paddingLeft: '36px', width: '100%' }}
+                                />
+                            </div>
+
+                            {/* Pending Sales List */}
+                            {filteredPendingSales.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                                    <Clock size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
+                                    <p>No hay pedidos pendientes</p>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    {filteredPendingSales.map(sale => {
+                                        const isNew = new Date() - new Date(sale.createdAt) < 60000; // Less than 1 min
+                                        const remaining = (sale.amountUSD || 0) - (sale.paidAmount || 0);
+
+                                        return (
+                                            <div
+                                                key={sale.id}
+                                                style={{
+                                                    padding: '1rem',
+                                                    background: isNew ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-secondary)',
+                                                    borderRadius: 'var(--radius-sm)',
+                                                    border: isNew ? '2px solid #ef4444' : '1px solid var(--border)',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                                onClick={() => {
+                                                    setSelectedSale(sale);
+                                                    setShowPaymentModal(true);
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                                                            {isNew && (
+                                                                <span style={{
+                                                                    background: '#ef4444',
+                                                                    color: 'white',
+                                                                    padding: '0.125rem 0.5rem',
+                                                                    borderRadius: '1rem',
+                                                                    fontSize: '0.7rem',
+                                                                    fontWeight: 600
+                                                                }}>
+                                                                    NUEVO
+                                                                </span>
+                                                            )}
+                                                            <strong>
+                                                                {sale.documentType === 'factura' ? 'Factura' : sale.documentType === 'presupuesto' ? 'Presupuesto' : 'Pedido'} #{sale.documentNumber}
+                                                            </strong>
+                                                        </div>
+                                                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                                                            {sale.customer?.name || 'Venta Rápida'}
+                                                        </p>
+                                                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                                                            {sale.description || sale.sku} × {sale.quantity}
+                                                        </p>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right' }}>
+                                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                                                            ${remaining.toFixed(2)}
+                                                        </div>
+                                                        {sale.paidAmount > 0 && (
+                                                            <div style={{ fontSize: '0.8rem', color: '#f59e0b' }}>
+                                                                Abonado: ${sale.paidAmount.toFixed(2)}
+                                                            </div>
+                                                        )}
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                                            Hace {Math.floor((new Date() - new Date(sale.createdAt)) / 60000)} min
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                                    <button
+                                                        className="btn btn-danger"
+                                                        style={{ padding: '0.5rem' }}
+                                                        onClick={(e) => handleDeletePendingSale(sale.id, e)}
+                                                        title={confirmDeleteSale === sale.id ? 'Confirmar eliminar' : 'Eliminar pedido'}
+                                                    >
+                                                        <Trash2 size={16} />
+                                                        {confirmDeleteSale === sale.id && <span style={{ marginLeft: '0.25rem', fontSize: '0.8rem' }}>?</span>}
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-secondary"
+                                                        style={{ padding: '0.5rem' }}
+                                                        onClick={(e) => handleEditPendingSale(sale, e)}
+                                                        title="Editar pedido (volver al POS)"
+                                                    >
+                                                        <Edit size={16} />
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-primary"
+                                                        style={{ flex: 1 }}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedSale(sale);
+                                                            setShowPaymentModal(true);
+                                                        }}
+                                                    >
+                                                        <DollarSign size={16} /> Cobrar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {activeTab === 'expenses' && (
+                        <div style={{ textAlign: 'center', padding: '2rem' }}>
+                            <button
+                                className="btn btn-primary"
+                                onClick={() => setShowExpenseModal(true)}
+                                style={{ marginBottom: '1rem' }}
+                            >
+                                <Plus size={16} /> Registrar Gasto
+                            </button>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => setShowWithdrawalModal(true)}
+                                style={{ marginLeft: '0.5rem', marginBottom: '1rem' }}
+                            >
+                                <ArrowUpCircle size={16} /> Solicitar Retiro
+                            </button>
+
+                            {/* List of expenses for today */}
+                            <div style={{ marginTop: '1rem' }}>
+                                {todayTransactions.filter(tx => tx.type === 'expense' || tx.type === 'withdrawal').map(tx => (
+                                    <div key={tx.id} style={{
+                                        padding: '0.75rem',
+                                        background: 'var(--bg-secondary)',
+                                        borderRadius: 'var(--radius-sm)',
+                                        marginBottom: '0.5rem',
+                                        textAlign: 'left'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span>{tx.description}</span>
+                                            <strong style={{ color: '#ef4444' }}>-${tx.totalAmount?.toFixed(2)}</strong>
+                                        </div>
+                                        <small style={{ color: 'var(--text-secondary)' }}>
+                                            {tx.type === 'withdrawal' ? 'Retiro' : 'Gasto'} - {new Date(tx.createdAt).toLocaleTimeString('es-VE')}
+                                        </small>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'returns' && (
+                        <div style={{ textAlign: 'center', padding: '2rem' }}>
+                            <RotateCcw size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
+                            <p style={{ color: 'var(--text-secondary)' }}>
+                                Para procesar una devolución, busque la venta original en Historial y seleccione "Devolver"
+                            </p>
+                        </div>
+                    )}
+
+                    {activeTab === 'history' && (
+                        <div>
+                            {todayTransactions.map(tx => (
+                                <div key={tx.id} style={{
+                                    padding: '0.75rem',
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    marginBottom: '0.5rem',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center'
+                                }}>
+                                    <div>
+                                        <div style={{ fontWeight: 500 }}>{tx.description}</div>
+                                        <small style={{ color: 'var(--text-secondary)' }}>
+                                            {new Date(tx.createdAt).toLocaleTimeString('es-VE')} - {tx.createdByName}
+                                        </small>
+                                    </div>
+                                    <div style={{
+                                        fontWeight: 'bold',
+                                        color: tx.type === 'sale' ? '#22c55e' : tx.type === 'return' ? '#f59e0b' : '#ef4444'
+                                    }}>
+                                        {tx.type === 'sale' ? '+' : '-'}${tx.totalAmount?.toFixed(2)}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {activeTab === 'authorizations' && canVerify && (
+                        <div>
+                            {authRequests.map(auth => (
+                                <div key={auth.id} style={{
+                                    padding: '1rem',
+                                    background: 'rgba(245, 158, 11, 0.1)',
+                                    border: '1px solid #f59e0b',
+                                    borderRadius: 'var(--radius-sm)',
+                                    marginBottom: '0.75rem'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                        <strong>{auth.type === 'withdrawal' ? 'Retiro' : 'Gasto'}</strong>
+                                        <span style={{ fontWeight: 'bold' }}>${auth.amount?.toFixed(2)} {auth.currency}</span>
+                                    </div>
+                                    <p style={{ margin: '0 0 0.5rem', color: 'var(--text-secondary)' }}>{auth.reason}</p>
+                                    <small style={{ color: 'var(--text-secondary)' }}>
+                                        Solicitado por {auth.requestedByName} - {new Date(auth.requestedAt).toLocaleTimeString('es-VE')}
+                                    </small>
+                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                        <button
+                                            className="btn btn-primary"
+                                            onClick={() => approveAuthorization(auth.id, currentUser.uid, userProfile?.displayName || currentUser.email)}
+                                            style={{ flex: 1 }}
+                                        >
+                                            <CheckCircle size={14} /> Aprobar
+                                        </button>
+                                        <button
+                                            className="btn btn-secondary"
+                                            onClick={() => rejectAuthorization(auth.id, currentUser.uid, userProfile?.displayName || currentUser.email)}
+                                            style={{ flex: 1 }}
+                                        >
+                                            <XCircle size={14} /> Rechazar
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Right Panel - Session Summary */}
+                <div className="glass-panel" style={{ padding: '1rem' }}>
+                    <h3 style={{ margin: '0 0 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <DollarSign size={18} /> Resumen del Turno
+                    </h3>
+
+                    {/* Opening Balance */}
+                    <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Apertura</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>USD:</span>
+                            <strong>${cashSession.openingBalance?.USD?.cash?.toFixed(2) || '0.00'}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span>Bs:</span>
+                            <strong>Bs {cashSession.openingBalance?.Bs?.cash?.toFixed(2) || '0.00'}</strong>
+                        </div>
+                    </div>
+
+                    {/* Totals by method */}
+                    <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Por Método</div>
+                        {Object.entries(sessionTotals.byMethod).map(([method, data]) => {
+                            const methodInfo = PAYMENT_METHODS[method];
+                            const Icon = methodInfo?.icon || DollarSign;
+                            return (
+                                <div key={method} style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    padding: '0.5rem',
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    marginBottom: '0.25rem'
+                                }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <Icon size={14} /> {methodInfo?.label || method}
+                                    </span>
+                                    <strong>{data.currency === 'Bs' ? 'Bs ' : '$'}{data.amount.toFixed(2)}</strong>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Summary stats */}
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span>Ventas ({sessionTotals.salesCount})</span>
+                            <strong style={{ color: '#22c55e' }}>+${sessionTotals.salesTotal.toFixed(2)}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span>Devoluciones</span>
+                            <strong style={{ color: '#f59e0b' }}>-${sessionTotals.returnsTotal.toFixed(2)}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span>Gastos/Retiros</span>
+                            <strong style={{ color: '#ef4444' }}>-${(sessionTotals.expensesTotal + sessionTotals.withdrawalsTotal).toFixed(2)}</strong>
+                        </div>
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            padding: '0.75rem',
+                            background: 'var(--primary)',
+                            color: 'white',
+                            borderRadius: 'var(--radius-sm)',
+                            marginTop: '0.5rem'
+                        }}>
+                            <span>TOTAL USD</span>
+                            <strong>${(sessionTotals.salesTotal - sessionTotals.returnsTotal - sessionTotals.expensesTotal - sessionTotals.withdrawalsTotal).toFixed(2)}</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Payment Modal */}
+            {showPaymentModal && selectedSale && (
+                <div className="modal-overlay" style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000
+                }}>
+                    <div className="glass-panel" style={{
+                        width: '90%',
+                        maxWidth: '600px',
+                        maxHeight: '90vh',
+                        overflow: 'auto',
+                        padding: '1.5rem'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={{ margin: 0 }}>Procesar Cobro</h3>
+                            <button
+                                onClick={() => {
+                                    setShowPaymentModal(false);
+                                    setSelectedSale(null);
+                                    setPaymentMethods([]);
+                                }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Sale Info */}
+                        <div style={{
+                            padding: '1rem',
+                            background: 'var(--bg-secondary)',
+                            borderRadius: 'var(--radius-sm)',
+                            marginBottom: '1rem'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                <span>{selectedSale.documentType === 'factura' ? 'Factura' : 'Pedido'} #{selectedSale.documentNumber}</span>
+                                <strong>{selectedSale.customer?.name || 'Venta Rápida'}</strong>
+                            </div>
+                            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                {selectedSale.description || selectedSale.sku} × {selectedSale.quantity}
+                            </div>
+                            <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Total a cobrar:</span>
+                                <strong style={{ fontSize: '1.25rem', color: 'var(--primary)' }}>
+                                    ${remainingAmount.toFixed(2)}
+                                </strong>
+                            </div>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                En Bs (Tasa {exchangeRate.toFixed(2)}): Bs {(remainingAmount * exchangeRate).toFixed(2)}
+                            </div>
+                        </div>
+
+                        {/* Payment Methods Selector */}
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                                Agregar Método de Pago:
+                            </label>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                {Object.entries(PAYMENT_METHODS).map(([key, method]) => {
+                                    const Icon = method.icon;
+                                    return (
+                                        <button
+                                            key={key}
+                                            className="btn btn-secondary"
+                                            onClick={() => addPaymentMethod(key)}
+                                            style={{ fontSize: '0.8rem', padding: '0.5rem' }}
+                                        >
+                                            <Icon size={14} /> {method.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Added Payment Methods */}
+                        {paymentMethods.length > 0 && (
+                            <div style={{ marginBottom: '1rem' }}>
+                                {paymentMethods.map((payment, index) => {
+                                    const method = PAYMENT_METHODS[payment.method];
+                                    return (
+                                        <div key={index} style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.75rem',
+                                            background: 'var(--bg-secondary)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            marginBottom: '0.5rem'
+                                        }}>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{method.label}</div>
+                                                <input
+                                                    type="number"
+                                                    value={payment.amount || ''}
+                                                    onChange={(e) => updatePaymentAmount(index, e.target.value)}
+                                                    placeholder="Monto"
+                                                    className="form-input"
+                                                    style={{ width: '100%' }}
+                                                />
+                                                {method.requiresRef && (
+                                                    <input
+                                                        type="text"
+                                                        value={payment.reference || ''}
+                                                        onChange={(e) => updatePaymentReference(index, e.target.value)}
+                                                        placeholder="Referencia"
+                                                        className="form-input"
+                                                        style={{ width: '100%', marginTop: '0.25rem' }}
+                                                    />
+                                                )}
+                                            </div>
+                                            <button
+                                                onClick={() => removePaymentMethod(index)}
+                                                style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    color: '#ef4444'
+                                                }}
+                                            >
+                                                <X size={18} />
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* Total and Change */}
+                        <div style={{
+                            padding: '1rem',
+                            background: totalPayment >= remainingAmount ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                            borderRadius: 'var(--radius-sm)',
+                            marginBottom: '1rem'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                <span>Total Recibido:</span>
+                                <strong>${totalPayment.toFixed(2)}</strong>
+                            </div>
+                            {totalPayment >= remainingAmount ? (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#22c55e' }}>
+                                    <span>Vuelto:</span>
+                                    <strong>${(totalPayment - remainingAmount).toFixed(2)}</strong>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#f59e0b' }}>
+                                    <span>Pendiente:</span>
+                                    <strong>${(remainingAmount - totalPayment).toFixed(2)}</strong>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    setShowPaymentModal(false);
+                                    setSelectedSale(null);
+                                    setPaymentMethods([]);
+                                }}
+                                style={{ flex: 1 }}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleProcessPayment}
+                                disabled={paymentMethods.length === 0 || totalPayment === 0}
+                                style={{ flex: 1 }}
+                            >
+                                {totalPayment >= remainingAmount ? (
+                                    <><CheckCircle size={16} /> Confirmar Pago</>
+                                ) : (
+                                    <><DollarSign size={16} /> Registrar Abono</>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* X Report Modal */}
+            {showXReportModal && (
+                <div className="modal-overlay" style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    background: 'rgba(0,0,0,0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 1000
+                }}>
+                    <div className="glass-panel" style={{
+                        width: '90%',
+                        maxWidth: '500px',
+                        padding: '1.5rem'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                            <h3 style={{ margin: 0 }}>Reporte X (Parcial)</h3>
+                            <button onClick={() => setShowXReportModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div style={{ marginBottom: '1rem' }}>
+                            <p><strong>Cajero:</strong> {cashSession.cashierName}</p>
+                            <p><strong>Apertura:</strong> {new Date(cashSession.openedAt).toLocaleString('es-VE')}</p>
+                            <p><strong>Hora Actual:</strong> {new Date().toLocaleString('es-VE')}</p>
+                        </div>
+
+                        <div style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                            <h4 style={{ margin: '0 0 0.5rem' }}>Resumen</h4>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Ventas:</span>
+                                <strong>{sessionTotals.salesCount}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Total Ventas:</span>
+                                <strong style={{ color: '#22c55e' }}>${sessionTotals.salesTotal.toFixed(2)}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Devoluciones:</span>
+                                <strong style={{ color: '#f59e0b' }}>-${sessionTotals.returnsTotal.toFixed(2)}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Gastos/Retiros:</span>
+                                <strong style={{ color: '#ef4444' }}>-${(sessionTotals.expensesTotal + sessionTotals.withdrawalsTotal).toFixed(2)}</strong>
+                            </div>
+                        </div>
+
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => {
+                                // Generate X Report PDF
+                                const doc = new jsPDF();
+                                doc.setFontSize(18);
+                                doc.text('REPORTE X - PARCIAL', 105, 20, { align: 'center' });
+                                doc.setFontSize(12);
+                                doc.text(`Cajero: ${cashSession.cashierName}`, 20, 40);
+                                doc.text(`Generado: ${new Date().toLocaleString('es-VE')}`, 20, 50);
+                                doc.text(`Ventas: ${sessionTotals.salesCount}`, 20, 70);
+                                doc.text(`Total Ventas: $${sessionTotals.salesTotal.toFixed(2)}`, 20, 80);
+                                doc.text(`Devoluciones: -$${sessionTotals.returnsTotal.toFixed(2)}`, 20, 90);
+                                doc.text(`Gastos: -$${(sessionTotals.expensesTotal + sessionTotals.withdrawalsTotal).toFixed(2)}`, 20, 100);
+                                doc.save(`ReporteX_${Date.now()}.pdf`);
+                                setShowXReportModal(false);
+                            }}
+                            style={{ width: '100%' }}
+                        >
+                            <Download size={16} /> Descargar PDF
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Z Report Modal */}
+            {showZReportModal && (
+                <ZReportModal
+                    cashSession={cashSession}
+                    sessionTotals={sessionTotals}
+                    closeCashSession={closeCashSession}
+                    onClose={() => setShowZReportModal(false)}
+                />
+            )}
+        </div>
+    );
+};
+
+// Z Report Modal Component
+const ZReportModal = ({ cashSession, sessionTotals, closeCashSession, onClose }) => {
+    const [closingUSD, setClosingUSD] = useState('');
+    const [closingBs, setClosingBs] = useState('');
+    const [processing, setProcessing] = useState(false);
+
+    const handleClose = async () => {
+        setProcessing(true);
+        try {
+            const result = await closeCashSession({
+                USD: { cash: parseFloat(closingUSD) || 0 },
+                Bs: { cash: parseFloat(closingBs) || 0 }
+            });
+
+            // Generate Z Report PDF
+            const doc = new jsPDF();
+            doc.setFontSize(18);
+            doc.setFont('helvetica', 'bold');
+            doc.text('REPORTE Z - CIERRE DE CAJA', 105, 20, { align: 'center' });
+
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Cajero: ${cashSession.cashierName}`, 20, 40);
+            doc.text(`Apertura: ${new Date(cashSession.openedAt).toLocaleString('es-VE')}`, 20, 50);
+            doc.text(`Cierre: ${new Date().toLocaleString('es-VE')}`, 20, 60);
+
+            doc.setFont('helvetica', 'bold');
+            doc.text('RESUMEN DE OPERACIONES', 20, 80);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Ventas: ${sessionTotals.salesCount} - $${sessionTotals.salesTotal.toFixed(2)}`, 20, 90);
+            doc.text(`Devoluciones: -$${sessionTotals.returnsTotal.toFixed(2)}`, 20, 100);
+            doc.text(`Gastos/Retiros: -$${(sessionTotals.expensesTotal + sessionTotals.withdrawalsTotal).toFixed(2)}`, 20, 110);
+
+            doc.setFont('helvetica', 'bold');
+            doc.text('CUADRE DE CAJA', 20, 130);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Efectivo USD declarado: $${closingUSD || 0}`, 20, 140);
+            doc.text(`Diferencia USD: $${result.difference?.USD?.cash?.toFixed(2) || 0}`, 20, 150);
+            doc.text(`Efectivo Bs declarado: Bs ${closingBs || 0}`, 20, 160);
+            doc.text(`Diferencia Bs: Bs ${result.difference?.Bs?.cash?.toFixed(2) || 0}`, 20, 170);
+
+            doc.save(`ReporteZ_${new Date().toISOString().split('T')[0]}.pdf`);
+
+            alert('Caja cerrada. Pendiente de verificación por administración.');
+            onClose();
+        } catch (error) {
+            alert('Error al cerrar caja: ' + error.message);
+        }
+        setProcessing(false);
+    };
+
+    return (
+        <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+        }}>
+            <div className="glass-panel" style={{
+                width: '90%',
+                maxWidth: '500px',
+                padding: '1.5rem'
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <h3 style={{ margin: 0, color: '#ef4444' }}>⚠️ Cierre de Caja (Reporte Z)</h3>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div style={{
+                    padding: '1rem',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    borderRadius: 'var(--radius-sm)',
+                    marginBottom: '1rem'
+                }}>
+                    <p style={{ margin: 0, color: '#ef4444' }}>
+                        <strong>Atención:</strong> Esta acción cerrará el turno y solicitará verificación de la Jefa de Administración.
+                    </p>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                        Efectivo USD en Caja:
+                    </label>
+                    <input
+                        type="number"
+                        value={closingUSD}
+                        onChange={(e) => setClosingUSD(e.target.value)}
+                        placeholder="0.00"
+                        className="form-input"
+                        style={{ width: '100%' }}
+                    />
+                </div>
+
+                <div style={{ marginBottom: '1.5rem' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+                        Efectivo Bs en Caja:
+                    </label>
+                    <input
+                        type="number"
+                        value={closingBs}
+                        onChange={(e) => setClosingBs(e.target.value)}
+                        placeholder="0.00"
+                        className="form-input"
+                        style={{ width: '100%' }}
+                    />
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        className="btn btn-secondary"
+                        onClick={onClose}
+                        disabled={processing}
+                        style={{ flex: 1 }}
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleClose}
+                        disabled={processing}
+                        style={{ flex: 1, background: '#ef4444' }}
+                    >
+                        {processing ? 'Procesando...' : 'Cerrar Caja'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default CashRegister;

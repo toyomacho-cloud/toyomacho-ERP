@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Etiqueta Zebra - TOYOMACHO</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+
+        .label-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .label {
+            width: 5.6cm;
+            height: 3.3cm;
+            border: 2px solid #333;
+            background: white;
+            padding: 0.3cm;
+            box-sizing: border-box;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.2cm;
+        }
+
+        .logo {
+            width: 2.5cm;
+            height: auto;
+        }
+
+        .logo img {
+            width: 100%;
+            height: auto;
+        }
+
+        .supplier {
+            font-size: 8pt;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        .reference {
+            font-size: 16pt;
+            font-weight: bold;
+            text-align: center;
+            margin: 0.1cm 0;
+            letter-spacing: 1px;
+        }
+
+        .description {
+            font-size: 9pt;
+            text-align: center;
+            margin-bottom: 0.1cm;
+            line-height: 1.1;
+        }
+
+        .location {
+            font-size: 8pt;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 0.15cm;
+            color: #333;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 7pt;
+            margin-top: auto;
+        }
+
+        .contact {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .icon {
+            width: 10px;
+            height: 10px;
+        }
+
+        .price {
+            font-size: 11pt;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e3f2fd;
+            border-radius: 4px;
+        }
+
+        .info h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+
+        .cipher {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="label-container">
+        <div class="label">
+            <div class="header">
+                <div class="logo">
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 60'%3E%3Crect fill='%23e60000' width='50' height='60'/%3E%3Ctext x='70' y='25' font-family='Arial' font-size='10' font-weight='bold'%3ERepuestos%3C/text%3E%3Ctext x='70' y='45' font-family='Arial' font-size='24' font-weight='bold'%3ETOYOMACHO%3C/text%3E%3C/svg%3E"
+                        alt="TOYOMACHO">
+                </div>
+                <div class="supplier">PROV: 001</div>
+            </div>
+
+            <div class="reference">REF-12345</div>
+
+            <div class="description">FILTRO DE ACEITE TOYOTA</div>
+
+            <div class="location">📍 A-1</div>
+
+            <div class="footer">
+                <div class="contact">
+                    <div class="contact-item">
+                        <span>📷</span>
+                        <span>@toyomacho</span>
+                    </div>
+                    <div class="contact-item">
+                        <span>📱</span>
+                        <span>0414-8972342</span>
+                    </div>
+                </div>
+                <div class="price">MR</div>
+            </div>
+        </div>
+
+        <div class="info">
+            <h3>📋 Especificaciones de la Etiqueta</h3>
+            <p><strong>Tamaño:</strong> 5.6cm × 3.3cm</p>
+            <p><strong>Impresora:</strong> Zebra TLP2824</p>
+            <p><strong>Elementos:</strong></p>
+            <ul>
+                <li>✅ Logo TOYOMACHO (más grande)</li>
+                <li>✅ Número de proveedor (PROV: XXX)</li>
+                <li>✅ Referencia del producto</li>
+                <li>✅ Descripción</li>
+                <li>✅ Instagram: @toyomacho</li>
+                <li>✅ WhatsApp: 0414-8972342</li>
+                <li>✅ Precio codificado (más pequeño)</li>
+            </ul>
+
+            <div class="cipher">
+                <strong>Patrón Murciélago:</strong><br>
+                M=1 U=2 R=3 C=4 I=5 E=6 L=7 A=8 G=9 O=0<br><br>
+                <strong>Ejemplo:</strong> $15.00 = MR
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

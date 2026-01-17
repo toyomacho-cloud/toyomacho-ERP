@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tarjeta Kanban - Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .description {
+            color: #666;
+            margin-bottom: 30px;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        .cards-container {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .kanban-card {
+            width: 350px;
+            height: 220px;
+            background: white;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+
+        .reference-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .reference {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .reference-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1a1a1a;
+            font-family: 'Consolas', monospace;
+        }
+
+        .location-badge {
+            background: #2196F3;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .checkboxes {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #333;
+            border-radius: 3px;
+            background: white;
+        }
+
+        .card-body {
+            flex: 1;
+        }
+
+        .field-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 3px;
+        }
+
+        .description-text {
+            font-size: 13px;
+            color: #333;
+            line-height: 1.4;
+            margin-bottom: 12px;
+        }
+
+        .notes-section {
+            border-top: 1px dashed #ccc;
+            padding-top: 8px;
+            margin-top: auto;
+        }
+
+        .notes-lines {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 5px;
+        }
+
+        .note-line {
+            height: 14px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        /* Variante 2 - Diseño compacto */
+        .kanban-card.compact {
+            height: 200px;
+        }
+
+        .kanban-card.compact .reference-value {
+            font-size: 16px;
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .kanban-card {
+                box-shadow: none;
+                page-break-inside: avoid;
+            }
+
+            h1,
+            .description {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🏷️ Tarjeta Kanban - Inventario</h1>
+    <p class="description">
+        Vista previa del diseño de tarjeta Kanban para productos del inventario.
+        Incluye: Referencia, Ubicación, Descripción, Casillas de verificación y espacio para Notas.
+    </p>
+
+    <div class="cards-container">
+        <!-- Tarjeta 1 - Ejemplo con datos -->
+        <div class="kanban-card">
+            <div class="card-header">
+                <div class="reference-row">
+                    <div>
+                        <div class="reference">Referencia</div>
+                        <div class="reference-value">TOY-001-A1</div>
+                    </div>
+                    <div class="location-badge">Estante A-3</div>
+                </div>
+                <div class="checkboxes">
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <div class="field-label">Descripción</div>
+                <div class="description-text">
+                    Filtro de aceite Toyota Corolla 2020 - Original
+                </div>
+
+                <div class="notes-section">
+                    <div class="field-label">Notas</div>
+                    <div class="notes-lines">
+                        <div class="note-line"></div>
+                        <div class="note-line"></div>
+                        <div class="note-line"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tarjeta 2 - En blanco -->
+        <div class="kanban-card">
+            <div class="card-header">
+                <div class="reference-row">
+                    <div>
+                        <div class="reference">Referencia</div>
+                        <div class="reference-value">___________</div>
+                    </div>
+                    <div class="location-badge">________</div>
+                </div>
+                <div class="checkboxes">
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                    <div class="checkbox"></div>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <div class="field-label">Descripción</div>
+                <div class="description-text" style="border-bottom: 1px solid #ddd; min-height: 35px;">
+                    &nbsp;
+                </div>
+
+                <div class="notes-section">
+                    <div class="field-label">Notas</div>
+                    <div class="notes-lines">
+                        <div class="note-line"></div>
+                        <div class="note-line"></div>
+                        <div class="note-line"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <p style="margin-top: 30px; color: #888; font-size: 14px;">
+        💡 Este diseño está listo para imprimir. Usa Ctrl+P para ver la versión de impresión.
+    </p>
+</body>
+
+</html>

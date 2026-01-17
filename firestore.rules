@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection - users can read/write their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Admins can read all users
+      allow read: if request.auth != null;
+    }
+    
+    // Companies collection
+    match /companies/{companyId} {
+      // Anyone authenticated can create a company
+      allow create: if request.auth != null;
+      // Members can read their company
+      allow read: if request.auth != null && request.auth.uid in resource.data.members;
+      // Members can update their company
+      allow update: if request.auth != null && request.auth.uid in resource.data.members;
+    }
+    
+    // Products - company members can access
+    match /products/{productId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Sales - company members can access
+    match /sales/{saleId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Purchases - company members can access  
+    match /purchases/{purchaseId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Inventory movements
+    match /movements/{movementId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Providers (Suppliers)
+    match /providers/{providerId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Categories
+    match /categories/{categoryId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Brands
+    match /brands/{brandId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Customers
+    match /customers/{customerId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Quotes
+    match /quotes/{quoteId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Internal Mail (NovaMail)
+    match /internalMail/{mailId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Payments (for accounts receivable)
+    match /payments/{paymentId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Cash Sessions (caja)
+    match /cashSessions/{sessionId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Cash Transactions
+    match /cashTransactions/{txId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Authorization Requests
+    match /authorizationRequests/{authId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Credit Notes
+    match /creditNotes/{noteId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
