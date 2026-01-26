@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../supabase';
+import {
+    auth,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged
+} from '../firebase';
 
 const AuthContext = createContext();
 
@@ -106,13 +113,13 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Fetch user profile from users table
-    const fetchUserProfile = async (userId) => {
+    // Fetch user profile from users table (using Email to link Firebase <-> Supabase)
+    const fetchUserProfile = async (email) => {
         try {
             const { data, error } = await supabase
                 .from('users')
                 .select('*')
-                .eq('uid', userId)
+                .eq('email', email)
                 .single();
 
             if (error && error.code !== 'PGRST116') {
@@ -126,108 +133,135 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // Listen for auth state changes
+    // Listen for auth state changes (FIREBASE)
     useEffect(() => {
-        // Get initial session
-        const getSession = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.user) {
-                setCurrentUser(session.user);
-                const profile = await fetchUserProfile(session.user.id);
-                setUserProfile(profile);
-            }
-            setLoading(false);
-        };
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            if (firebaseUser) {
+                // User is authenticated in Firebase
+                setLoading(true);
+                try {
+                    // Try to fetch profile from Supabase
+                    const profile = await fetchUserProfile(firebaseUser.email);
 
-        getSession();
+                    if (profile) {
+                        // Check if user is inactive
+                        if (!profile.active) {
+                            console.warn('User is inactive, logging out');
+                            await signOut(auth);
+                            setCurrentUser(null);
+                            setUserProfile(null);
+                            return;
+                        }
 
-        // Subscribe to auth changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (session?.user) {
-                setCurrentUser(session.user);
-                const profile = await fetchUserProfile(session.user.id);
-                setUserProfile(profile);
+                        setUserProfile(profile);
+                        // Merge Firebase User + Supabase Profile
+                        setCurrentUser({ ...firebaseUser, ...profile });
+                    } else {
+                        // Profile doesn't exist in Supabase yet?
+                        // Fallback to basic Firebase user, permissions will fail safely
+                        console.warn("User in Firebase but not in Supabase");
+                        setCurrentUser(firebaseUser);
+                        setUserProfile(null);
+                    }
+                } catch (e) {
+                    console.error("Auth State Error:", e);
+                    setCurrentUser(firebaseUser);
+                }
             } else {
+                // User is signed out
                 setCurrentUser(null);
                 setUserProfile(null);
             }
             setLoading(false);
         });
 
-        return () => subscription.unsubscribe();
+        return () => unsubscribe();
     }, []);
 
-    // Register new user
+    // Subscribe to auth changes
+    // (Removed old Supabase subscription code as it is replaced by Firebase above)
+
+    // Register new user (FIREBASE + SUPABASE)
     const register = async (email, password, displayName, role = ROLES.VENDEDOR) => {
         try {
             setError(null);
 
-            // Create auth user
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email,
-                password,
-                options: {
-                    data: { display_name: displayName }
-                }
-            });
+            // 1. Create auth user in Firebase
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            const firebaseUser = userCredential.user;
 
-            if (authError) throw authError;
-
-            // Create user profile in users table
+            // 2. Create user profile in Supabase users table
+            // Note: We deliberately assume this works. If it fails due to RLS, the user exists in Firebase but not DB.
             const { error: profileError } = await supabase
                 .from('users')
                 .insert({
-                    uid: authData.user.id,
+                    uid: firebaseUser.uid, // Store Firebase UID
                     email,
                     display_name: displayName,
                     role,
                     modules: { ...DEFAULT_MODULES },
-                    active: true,
-                    created_at: new Date().toISOString()
+                    active: true, // Default active
+                    created_at: new Date().toISOString(),
+                    firebase_id: firebaseUser.uid // Clarity
                 });
 
             if (profileError) {
-                console.error('Error creating user profile:', profileError);
+                console.error('Error creating local profile:', profileError);
+                // We don't rollback Firebase user here to avoid complexity, but ideally we should.
             }
 
-            return { success: true, user: authData.user };
+            return { success: true, user: firebaseUser };
         } catch (err) {
-            setError(err.message);
-            return { success: false, error: err.message };
+            let msg = err.message;
+            if (msg.includes('email-already-in-use')) msg = 'El correo ya está registrado.';
+            setError(msg);
+            return { success: false, error: msg };
         }
     };
 
-    // Login
+    // Login (FIREBASE)
     const login = async (email, password) => {
         try {
             setError(null);
-            const { data, error: loginError } = await supabase.auth.signInWithPassword({
-                email,
-                password
-            });
 
-            if (loginError) {
-                let errorMessage = 'Error al iniciar sesión';
-                if (loginError.message.includes('Invalid login')) {
-                    errorMessage = 'Credenciales inválidas';
-                } else if (loginError.message.includes('Email not confirmed')) {
-                    errorMessage = 'Email no confirmado';
+            // 1. Firebase Login
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            // If we reach here, email/pass is correct and VALID. No "email not confirmed" error.
+
+            // 2. Check Active Status in Supabase
+            const userProfile = await fetchUserProfile(email);
+
+            if (userProfile) {
+                // Check if user is inactive
+                if (!userProfile.active) {
+                    await signOut(auth);
+                    const msg = 'Usuario desactivado. Contacte al administrador.';
+                    setError(msg);
+                    return { success: false, error: msg };
                 }
-                setError(errorMessage);
-                return { success: false, error: errorMessage };
-            }
 
-            return { success: true, user: data.user };
+                // Success with profile
+                return { success: true, user: userCredential.user };
+            } else {
+                // User exists in Firebase but not in Supabase?
+                // Allow login, but they might have limited access
+                console.warn("Login successful but no Supabase profile found.");
+                return { success: true, user: userCredential.user };
+            }
         } catch (err) {
-            setError(err.message);
-            return { success: false, error: err.message };
+            let msg = err.message;
+            if (msg.includes('auth/invalid-credential')) msg = 'Credenciales inválidas.';
+            else if (msg.includes('auth/user-not-found')) msg = 'Usuario no encontrado.';
+            else if (msg.includes('auth/wrong-password')) msg = 'Contraseña incorrecta.';
+            setError(msg);
+            return { success: false, error: msg };
         }
     };
 
     // Logout
     const logout = async () => {
         try {
-            await supabase.auth.signOut();
+            await signOut(auth); // Firebase SignOut
             setCurrentUser(null);
             setUserProfile(null);
             return { success: true };
@@ -310,20 +344,33 @@ export const AuthProvider = ({ children }) => {
         return rolePermissions ? rolePermissions[permission] : false;
     };
 
-    // Check if user is admin
+    // Check if user is admin (case-insensitive)
     const isAdmin = () => {
-        return userProfile?.role === ROLES.ADMIN;
+        const userRole = (userProfile?.role || '').toLowerCase();
+        return userRole === 'admin';
     };
 
     // Check if current user can access a module
     const canAccessModule = (moduleId) => {
-        if (!userProfile) return false;
-        // Admin siempre tiene acceso a todo
-        if (userProfile.role === ROLES.ADMIN) return true;
-        // Si el usuario no tiene módulos configurados, dar acceso a todo (excepto settings)
-        if (!userProfile.modules) {
-            return moduleId !== 'settings';
+        // Si no hay perfil cargado aún, dar acceso temporal para evitar sidebar vacío
+        if (!userProfile) {
+            console.log('canAccessModule: No userProfile yet, granting temp access');
+            return true; // Cambiado de false a true para evitar sidebar vacío
         }
+
+        // Admin siempre tiene acceso a todo
+        if (userProfile.role === ROLES.ADMIN) {
+            return true;
+        }
+
+        // Si el usuario no tiene módulos configurados, dar acceso a módulos básicos
+        if (!userProfile.modules || Object.keys(userProfile.modules).length === 0) {
+            console.log('canAccessModule: User has no modules configured, granting basic access');
+            // Dar acceso a todos excepto settings y admin-only modules
+            const restrictedModules = ['settings', 'article177'];
+            return !restrictedModules.includes(moduleId);
+        }
+
         // Si tiene módulos configurados, verificar permiso específico
         return userProfile.modules[moduleId] === true;
     };

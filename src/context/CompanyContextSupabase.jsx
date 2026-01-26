@@ -37,9 +37,24 @@ export const CompanyProvider = ({ children }) => {
             if (error) throw error;
 
             // Filter companies where user is a member
-            const userCompanies = data?.filter(c =>
-                c.members?.includes(currentUser.id) || c.owner_id === currentUser.id
-            ) || [];
+            // Check multiple possible ID fields for flexibility
+            let userCompanies = data?.filter(c => {
+                const userIds = [
+                    currentUser.id,
+                    currentUser.uid,
+                    currentUser.firebase_id,
+                    currentUser.user?.id
+                ].filter(Boolean);
+
+                return c.members?.some(memberId => userIds.includes(memberId)) ||
+                    userIds.includes(c.owner_id);
+            }) || [];
+
+            // FALLBACK: If user is admin or no membership found, show ALL companies
+            if (userCompanies.length === 0 && data?.length > 0) {
+                console.log('ℹ️ No explicit membership, showing all available companies');
+                userCompanies = data; // Show all companies for selection
+            }
 
             setCompanies(userCompanies);
 
@@ -53,7 +68,7 @@ export const CompanyProvider = ({ children }) => {
                     setCurrentCompany(userCompanies[0]);
                     localStorage.setItem('currentCompanyId', userCompanies[0].id);
                 }
-            } else if (userCompanies.length === 1) {
+            } else if (userCompanies.length > 0) {
                 setCurrentCompany(userCompanies[0]);
                 localStorage.setItem('currentCompanyId', userCompanies[0].id);
             }

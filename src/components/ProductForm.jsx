@@ -1,9 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, RefreshCw, Plus } from 'lucide-react';
-import { useInventoryContext } from '../context/InventoryContext';
 
-const ProductForm = ({ isOpen, onClose, editProduct }) => {
-    const { products, brands, categories, addProduct, updateProduct, addBrand, addCategory } = useInventoryContext();
+const ProductForm = ({
+    isOpen,
+    onClose,
+    editProduct,
+    products = [],
+    brands = [],
+    categories = [],
+    addProduct,
+    updateProduct,
+    addBrand,
+    addCategory
+}) => {
+    // Fallback: Extract unique brands from products if brands table is empty
+    const effectiveBrands = brands.length > 0 ? brands :
+        [...new Set(products.map(p => p.brand).filter(Boolean))]
+            .map((name, idx) => ({ id: idx + 1, name, code: name.substring(0, 3).toUpperCase() }));
+
+    // Fallback: Extract unique categories from products if categories table is empty
+    const effectiveCategories = categories.length > 0 ? categories :
+        [...new Set(products.map(p => p.category).filter(Boolean))]
+            .map((name, idx) => ({ id: idx + 1, name, code: String((idx + 1) * 10).padStart(3, '0') }));
+
+    // Context removed - using props
     const [formData, setFormData] = useState({
         sku: '',
         reference: '',
@@ -38,13 +58,13 @@ const ProductForm = ({ isOpen, onClose, editProduct }) => {
 
     // Filter categories based on search term
     const filteredCategories = categorySearchTerm
-        ? categories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.toLowerCase()))
-        : categories;
+        ? effectiveCategories.filter(c => c.name.toLowerCase().includes(categorySearchTerm.toLowerCase()))
+        : effectiveCategories;
 
     // Filter brands based on search term
     const filteredBrands = brandSearchTerm
-        ? brands.filter(b => b.name.toLowerCase().includes(brandSearchTerm.toLowerCase()))
-        : brands;
+        ? effectiveBrands.filter(b => b.name.toLowerCase().includes(brandSearchTerm.toLowerCase()))
+        : effectiveBrands;
 
     useEffect(() => {
         if (editProduct) {
@@ -68,36 +88,6 @@ const ProductForm = ({ isOpen, onClose, editProduct }) => {
     }, [editProduct, isOpen]);
 
     // Auto-generate SKU when Brand or Category changes (Only for new products)
-    // Auto-generate SKU when Brand or Category changes (Only for new products)
-    useEffect(() => {
-        // STRICT CHECK: Only generate if NOT editing AND we have both brand and category
-        if (!editProduct && formData.brand && formData.category) {
-            generateSku(false);
-        }
-        // CRITICAL: Dependency array MUST ONLY contain brand, category, and editProduct.
-        // Do NOT add formData (entire object) or other fields like location.
-    }, [formData.brand, formData.category, editProduct]);
-
-    // Check for duplicate SKU when SKU changes
-    useEffect(() => {
-        if (!formData.sku || formData.sku.trim() === '') {
-            setIsDuplicateSKU(false);
-            return;
-        }
-
-        // Check if SKU exists in products (excluding current product when editing)
-        const duplicate = products.some(p => {
-            if (editProduct?.id && p.id === editProduct.id) {
-                return false; // Exclude current product when editing
-            }
-            return p.sku && p.sku.toLowerCase() === formData.sku.toLowerCase();
-        });
-
-        setIsDuplicateSKU(duplicate);
-    }, [formData.sku, products, editProduct]);
-
-    if (!isOpen) return null;
-
     const generateSku = (showAlert = true) => {
         if (!formData.brand || !formData.category) {
             if (showAlert) alert('Por favor seleccione la Marca y Categoría primero.');
@@ -112,7 +102,6 @@ const ProductForm = ({ isOpen, onClose, editProduct }) => {
         const selectedCategory = categories.find(c => c.name === formData.category);
         const catCode = selectedCategory ? selectedCategory.code : '999';
 
-        // 3. Sequence
         // 3. Sequence (Fix: Find Max Sequence + 1)
         const relatedProducts = products.filter(p =>
             p.brand === formData.brand &&
@@ -140,6 +129,16 @@ const ProductForm = ({ isOpen, onClose, editProduct }) => {
         setFormData(prev => ({ ...prev, sku: newSku }));
     };
 
+    // Auto-generate SKU when Brand or Category changes (Only for new products)
+    useEffect(() => {
+        // STRICT CHECK: Only generate if NOT editing AND we have both brand and category
+        if (!editProduct && formData.brand && formData.category) {
+            generateSku(false);
+        }
+        // CRITICAL: Dependency array MUST ONLY contain brand, category, and editProduct.
+        // Do NOT add formData (entire object) or other fields like location.
+    }, [formData.brand, formData.category, editProduct]);
+
     const handleSubmit = (e) => {
         e.preventDefault();
         const productData = {
@@ -149,13 +148,23 @@ const ProductForm = ({ isOpen, onClose, editProduct }) => {
             minStock: parseInt(formData.minStock) || 0
         };
 
-        if (editProduct) {
-            updateProduct(editProduct.id, productData);
-        } else {
-            addProduct(productData);
-        }
-        onClose();
+        const action = editProduct
+            ? updateProduct(editProduct.id, productData)
+            : addProduct(productData);
+
+        action
+            .then(() => {
+                console.log(editProduct ? '✅ Producto actualizado' : '✅ Producto agregado');
+                onClose();
+            })
+            .catch((error) => {
+                console.error('❌ Error guardando producto:', error);
+                alert(`Error al guardar el producto: ${error.message || 'Error desconocido'}`);
+            });
     };
+
+
+
 
     const handleBrandSubmit = (e) => {
         e.preventDefault();

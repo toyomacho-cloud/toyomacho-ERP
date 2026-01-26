@@ -52,21 +52,21 @@ const CashRegister = ({ onNavigate }) => {
         cashTransactions,
         authRequests,
         creditNotes,
-        openCashSession,
+        openCashSession: hookOpenCashSession,
         closeCashSession,
-        verifyCashSession,
-        processSalePayment,
-        processExpense,
-        processWithdrawal,
-        approveAuthorization,
-        rejectAuthorization,
-        processReturn,
-        getPendingSales,
-        cancelSale
-    } = useInventory(userProfile?.companyId);
+        addPayment,
+        updateSale,
+        deleteSale,
+        addCashTransaction,
+        approveAuthRequest,
+        rejectAuthRequest,
+        addCreditNote,
+        processSalePayment
+    } = useInventory(userProfile?.company_id);
 
     // Tabs
     const [activeTab, setActiveTab] = useState('pending');
+
 
     // Modals
     const [showOpeningModal, setShowOpeningModal] = useState(false);
@@ -105,7 +105,7 @@ const CashRegister = ({ onNavigate }) => {
                 localStorage.setItem('nova_cart', JSON.stringify(cartItems));
                 localStorage.setItem('nova_pos_mode', sale.isQuote ? 'quote' : 'sale');
 
-                await cancelSale(sale.id);
+                await deleteSale(sale.id);
                 onNavigate('pos');
             } catch (error) {
                 console.error('Error editing sale:', error);
@@ -118,7 +118,7 @@ const CashRegister = ({ onNavigate }) => {
         e.stopPropagation();
         if (confirmDeleteSale === saleId) {
             try {
-                await cancelSale(saleId);
+                await deleteSale(saleId);
                 setConfirmDeleteSale(null);
             } catch (error) {
                 console.error('Error deleting sale:', error);
@@ -132,10 +132,19 @@ const CashRegister = ({ onNavigate }) => {
 
     // Get pending sales
     const pendingSales = useMemo(() => {
-        return sales.filter(s =>
-            s.paymentStatus === 'pending_payment' ||
-            s.paymentStatus === 'partial'
-        ).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        console.log('=== PENDING SALES DEBUG ===');
+        console.log('Total sales:', sales.length);
+        console.log('Sample sale structure:', sales[0]);
+
+        const filtered = sales.filter(s =>
+            s.payment_status === 'pending_payment' ||
+            s.payment_status === 'partial'
+        );
+
+        console.log('Filtered pending sales:', filtered.length);
+        console.log('First pending sale:', filtered[0]);
+
+        return filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }, [sales]);
 
     // Get today's transactions
@@ -184,7 +193,7 @@ const CashRegister = ({ onNavigate }) => {
         if (!searchTerm) return pendingSales;
         const term = searchTerm.toLowerCase();
         return pendingSales.filter(s =>
-            s.documentNumber?.toLowerCase().includes(term) ||
+            s.document_number?.toLowerCase().includes(term) ||
             s.customer?.name?.toLowerCase().includes(term) ||
             s.sku?.toLowerCase().includes(term)
         );
@@ -195,16 +204,40 @@ const CashRegister = ({ onNavigate }) => {
 
     // Handle opening cash session
     const handleOpenSession = async () => {
+        console.log('=== OPENING CASH SESSION ===');
+        console.log('currentUser:', currentUser);
+        console.log('userProfile:', userProfile);
+        console.log('company_id:', userProfile?.company_id);
+        console.log('openingUSD:', openingUSD);
+        console.log('openingBs:', openingBs);
+
         try {
-            await openCashSession(
-                { USD: parseFloat(openingUSD) || 0, Bs: parseFloat(openingBs) || 0 },
-                currentUser.uid,
-                userProfile?.displayName || currentUser.email
-            );
+            const cashierData = {
+                id: currentUser.uid,
+                name: userProfile?.displayName || currentUser.email
+            };
+            const openingData = {
+                usd: parseFloat(openingUSD) || 0,
+                bs: parseFloat(openingBs) || 0
+            };
+
+            console.log('Calling hookOpenCashSession with:', { cashierData, openingData });
+
+            const result = await hookOpenCashSession(cashierData, openingData);
+
+            console.log('hookOpenCashSession result:', result);
+
             setShowOpeningModal(false);
             setOpeningUSD('');
             setOpeningBs('');
         } catch (error) {
+            console.error('ERROR in handleOpenSession:', error);
+            console.error('Error details:', {
+                message: error.message,
+                code: error.code,
+                details: error.details,
+                hint: error.hint
+            });
             alert('Error al abrir caja: ' + error.message);
         }
     };
@@ -256,7 +289,7 @@ const CashRegister = ({ onNavigate }) => {
         // Document info
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Documento: ${sale.documentType === 'factura' ? 'Factura' : 'Pedido'} #${sale.documentNumber}`, 20, 55);
+        doc.text(`Documento: ${sale.document_type === 'factura' ? 'Factura' : 'Pedido'} #${sale.document_number}`, 20, 55);
         doc.text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, 20, 62);
         doc.text(`Hora: ${new Date().toLocaleTimeString('es-VE')}`, 20, 69);
 
@@ -293,7 +326,7 @@ const CashRegister = ({ onNavigate }) => {
         if (!isPaid) {
             y += 10;
             doc.setTextColor(255, 0, 0);
-            doc.text(`PENDIENTE: $${(sale.amountUSD - totalPaid).toFixed(2)}`, 20, y);
+            doc.text(`PENDIENTE: $${(sale.amount_usd - totalPaid).toFixed(2)}`, 20, y);
             doc.setTextColor(0, 0, 0);
         }
 
@@ -343,7 +376,7 @@ const CashRegister = ({ onNavigate }) => {
     // Calculate remaining for selected sale
     const remainingAmount = useMemo(() => {
         if (!selectedSale) return 0;
-        return (selectedSale.amountUSD || 0) - (selectedSale.paidAmount || 0);
+        return (selectedSale.amount_usd || 0) - (selectedSale.paid_amount || 0);
     }, [selectedSale]);
 
     // If no cash session, show opening modal or pending verification
@@ -589,7 +622,7 @@ const CashRegister = ({ onNavigate }) => {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                                     {filteredPendingSales.map(sale => {
                                         const isNew = new Date() - new Date(sale.createdAt) < 60000; // Less than 1 min
-                                        const remaining = (sale.amountUSD || 0) - (sale.paidAmount || 0);
+                                        const remaining = (sale.amount_usd || 0) - (sale.paid_amount || 0);
 
                                         return (
                                             <div
@@ -623,27 +656,33 @@ const CashRegister = ({ onNavigate }) => {
                                                                 </span>
                                                             )}
                                                             <strong>
-                                                                {sale.documentType === 'factura' ? 'Factura' : sale.documentType === 'presupuesto' ? 'Presupuesto' : 'Pedido'} #{sale.documentNumber}
+                                                                {sale.document_type === 'factura' ? 'Factura' : sale.document_type === 'presupuesto' ? 'Presupuesto' : 'Pedido'} #{sale.document_number}
                                                             </strong>
                                                         </div>
                                                         <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                                                             {sale.customer?.name || 'Venta Rápida'}
                                                         </p>
-                                                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-                                                            {sale.description || sale.sku} × {sale.quantity}
-                                                        </p>
+                                                        {sale.sale_items && sale.sale_items.length > 0 && (
+                                                            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                                                                {sale.sale_items.map((item, idx) => {
+                                                                    const desc = item.product?.description || item.product?.sku || 'Producto';
+                                                                    const qty = item.quantity || 1;
+                                                                    return `${desc} ×${qty}${idx < sale.sale_items.length - 1 ? ', ' : ''}`;
+                                                                }).join('')}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                     <div style={{ textAlign: 'right' }}>
                                                         <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--primary)' }}>
                                                             ${remaining.toFixed(2)}
                                                         </div>
-                                                        {sale.paidAmount > 0 && (
+                                                        {sale.paid_amount > 0 && (
                                                             <div style={{ fontSize: '0.8rem', color: '#f59e0b' }}>
-                                                                Abonado: ${sale.paidAmount.toFixed(2)}
+                                                                Abonado: ${sale.paid_amount.toFixed(2)}
                                                             </div>
                                                         )}
                                                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                                            Hace {Math.floor((new Date() - new Date(sale.createdAt)) / 60000)} min
+                                                            Hace {Math.floor((new Date() - new Date(sale.created_at)) / 60000)} min
                                                         </div>
                                                     </div>
                                                 </div>
@@ -887,9 +926,11 @@ const CashRegister = ({ onNavigate }) => {
                     bottom: 0,
                     background: 'rgba(0,0,0,0.5)',
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start',
                     justifyContent: 'center',
-                    zIndex: 1000
+                    paddingTop: '2rem',
+                    zIndex: 1000,
+                    overflowY: 'auto'
                 }}>
                     <div className="glass-panel" style={{
                         width: '90%',
@@ -920,12 +961,18 @@ const CashRegister = ({ onNavigate }) => {
                             marginBottom: '1rem'
                         }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                <span>{selectedSale.documentType === 'factura' ? 'Factura' : 'Pedido'} #{selectedSale.documentNumber}</span>
+                                <span>{selectedSale.document_type === 'factura' ? 'Factura' : 'Pedido'} #{selectedSale.document_number}</span>
                                 <strong>{selectedSale.customer?.name || 'Venta Rápida'}</strong>
                             </div>
-                            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                                {selectedSale.description || selectedSale.sku} × {selectedSale.quantity}
-                            </div>
+                            {selectedSale.sale_items && selectedSale.sale_items.length > 0 && (
+                                <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                    {selectedSale.sale_items.map((item, idx) => (
+                                        <div key={idx}>
+                                            {item.product?.description || item.product?.sku || 'Producto'} ×{item.quantity || 1}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                             <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
                                 <span>Total a cobrar:</span>
                                 <strong style={{ fontSize: '1.25rem', color: 'var(--primary)' }}>

@@ -1,211 +1,284 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
-    Package, User, FileText, CheckCircle, Search, Plus, Minus, Trash2,
-    ChevronRight, ChevronLeft, ShoppingCart, DollarSign, RefreshCw,
-    UserPlus, Users, Receipt, FileCheck, X, MapPin, Phone, Mail, ClipboardList, Calendar
-} from '../utils/icons';
-import DailySalesModal from './DailySalesModal';
-import InvoiceDocument from './InvoiceDocument';
-import { useInventoryContext } from '../context/InventoryContext';
+    Search,
+    ShoppingCart,
+    Trash2,
+    Plus,
+    Minus,
+    User,
+    List,
+    Grid,
+    CheckCircle,
+    X,
+    UserPlus,
+    ChevronRight,
+    ChevronLeft,
+    DollarSign,
+    RefreshCw,
+    Package,
+    Receipt,
+    FileCheck,
+    CreditCard,
+    Smartphone,
+    Building,
+    Printer,
+    Download
+} from 'lucide-react';
 import { useCompany } from '../context/CompanyContext';
-import { auth, db } from '../firebase';
-import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
+import { useInventory } from '../hooks/useInventory';
+import { useExchangeRates } from '../context/ExchangeRateContext';
+import InvoiceDocument from './InvoiceDocument';
+import DailySalesModal from './DailySalesModal';
+
+// Simple debounce implementation to avoid lodash dependency
+const debounce = (func, wait) => {
+    let timeout;
+    return (...args) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+    };
+};
+
+// Icons for payment methods
+const PAYMENT_METHODS = {
+    cash_usd: { label: 'Efectivo USD', icon: DollarSign, currency: 'USD' },
+    cash_bs: { label: 'Efectivo Bs', icon: DollarSign, currency: 'Bs' },
+    punto: { label: 'Punto de Venta', icon: CreditCard, currency: 'USD', requiresRef: true }, // Usually processed in Bs, but amount input is USD equiv often
+    transfer_usd: { label: 'Transferencia USD', icon: Building, currency: 'USD', requiresRef: true },
+    transfer_bs: { label: 'Transferencia Bs', icon: Building, currency: 'Bs', requiresRef: true },
+    zelle: { label: 'Zelle', icon: Smartphone, currency: 'USD', requiresRef: true },
+    pago_movil: { label: 'Pago Móvil', icon: Smartphone, currency: 'Bs', requiresRef: true }
+};
 
 const POS = () => {
-    const { products, addSale, sales, customers, addCustomer } = useInventoryContext();
     const { currentCompany } = useCompany();
-    const [showSalesModal, setShowSalesModal] = useState(false);
+    const { currentUser } = useAuth();
+    const { products, sales, customers, addSale, addCustomer, cashSession } = useInventory(currentCompany?.id);
+    const { bcvRate, usdtRate: binanceRate, loading: loadingRates, refreshRates } = useExchangeRates();
 
-    // Wizard step
-    const [step, setStep] = useState(1);
-    const steps = [
-        { id: 1, label: 'Productos', icon: Package },
-        { id: 2, label: 'Cliente', icon: User },
-        { id: 3, label: 'Tipo Venta', icon: FileText },
-        { id: 4, label: 'Documento', icon: Receipt },
-        { id: 5, label: 'Listo', icon: CheckCircle }
-    ];
-
-    // Exchange rates
-    const [bcvRate, setBcvRate] = useState(0);
-    const [binanceRate, setBinanceRate] = useState(0);
-    const [exchangeRate, setExchangeRate] = useState(0); // Currently selected rate
-    const [selectedRateType, setSelectedRateType] = useState('bcv'); // bcv or binance
-    const [loadingRates, setLoadingRates] = useState(false);
-
-    // Cart
-    const [cart, setCart] = useState([]);
+    // Local State
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [loadingProducts, setLoadingProducts] = useState(false);
+    const [activeCartId, setActiveCartId] = useState(1);
+    const [showSalesModal, setShowSalesModal] = useState(false);
+    const [posMode, setPosMode] = useState('sale'); // 'sale' or 'quote'
 
-    // Customer
-    const [customerType, setCustomerType] = useState('quick'); // quick, existing, new
-    const [selectedCustomer, setSelectedCustomer] = useState(null);
-    const [customerSearch, setCustomerSearch] = useState('');
-    // const [customers, setCustomers] = useState([]); // REMOVED: Using context customers
-    const [newCustomer, setNewCustomer] = useState({
-        type: 'V', name: '', rif: '', phone: '', address: ''
+    // Exchange Rate State (Global for POS)
+    const [exchangeRate, setExchangeRate] = useState(36.5);
+    const [selectedRateType, setSelectedRateType] = useState(() => localStorage.getItem('selectedRateType') || 'bcv');
+
+    // Stats Calculation
+    const dailyStats = useMemo(() => {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date();
+        endOfDay.setHours(23, 59, 59, 999);
+
+        return sales.reduce((acc, sale) => {
+            const saleDate = new Date(sale.createdAt || sale.created_at);
+            if (saleDate >= startOfDay && saleDate <= endOfDay) {
+                const isPending = sale.status === 'pending' || sale.payment_status === 'pending';
+                const amountUSD = parseFloat(sale.total || sale.amount_usd) || 0;
+
+                acc.totalUSD += amountUSD;
+                if (isPending) {
+                    acc.pendingCount++;
+                    acc.pendingUSD += amountUSD;
+                } else {
+                    acc.processedCount++;
+                    acc.processedUSD += amountUSD;
+                }
+            }
+            return acc;
+        }, { totalUSD: 0, pendingCount: 0, pendingUSD: 0, processedCount: 0, processedUSD: 0 });
+    }, [sales]);
+
+    // Carts State
+    const createEmptyCart = (id) => ({
+        id,
+        label: `Carrito ${id}`,
+        items: [],
+        customer: null,
+        newCustomer: { type: 'V', name: '', rif: '', phone: '', address: '' },
+        customerType: 'quick', // 'quick', 'existing', 'new'
+        customerSearch: '',
+        step: 1, // 1: Products, 2: Customer, 3: Sale Type, 4: Payment, 5: Document
+        saleType: 'contado', // 'contado', 'credito'
+        creditDays: 30,
+        customCreditDays: '',
+        documentType: 'pedido', // 'pedido', 'factura'
+        paymentMethods: [] // [{ method: 'cash_usd', amount: 10, ... }]
     });
 
-    // Sale type
-    const [saleType, setSaleType] = useState('contado'); // contado, credito
-    const [posMode, setPosMode] = useState('sale'); // sale, quote (presupuesto)
-    const [creditDays, setCreditDays] = useState(30);
-    const [customCreditDays, setCustomCreditDays] = useState('');
+    const [carts, setCarts] = useState(() => {
+        try {
+            const saved = localStorage.getItem('pos_carts');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    // Normalize carts to ensure 'items' and 'paymentMethods' exist
+                    return parsed.map(c => ({
+                        ...createEmptyCart(c.id), // Start with default structure
+                        ...c, // Override with saved data
+                        items: Array.isArray(c.items) ? c.items : [], // Force array
+                        paymentMethods: Array.isArray(c.paymentMethods) ? c.paymentMethods : [] // Force array
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error('Error parsing pos_carts:', e);
+        }
+        return [createEmptyCart(1)];
+    });
 
-    // Document type
-    const [documentType, setDocumentType] = useState('pedido'); // pedido, factura
+    const activeCart = carts.find(c => c.id === activeCartId) || carts[0];
+    // Safeguard against missing properties (stale localStorage)
+    const {
+        step = 1,
+        items: activeCartItems = [], // Default to empty array if undefined
+        customer = null,
+        newCustomer = { type: 'V', name: '', rif: '', phone: '', address: '' },
+        customerType = 'quick',
+        customerSearch = '',
+        saleType = 'contado',
+        documentType = 'pedido',
+        creditDays = 30,
+        customCreditDays = '',
+        paymentMethods = [] // Default to empty array
+    } = activeCart || {};
 
-    // Completed sale for document view
+    // Completed Sale State (for viewing/printing)
     const [completedSale, setCompletedSale] = useState(null);
     const [documentNumber, setDocumentNumber] = useState('');
 
-    // Fetch BCV rate
-    const fetchBcvRate = async () => {
-        try {
-            const response = await fetch('https://ve.dolarapi.com/v1/dolares');
-            const data = await response.json();
-            const oficialRate = data.find(item => item.fuente === 'oficial');
-            if (oficialRate?.promedio) {
-                const rate = Math.round(oficialRate.promedio * 100) / 100;
-                setBcvRate(rate);
-                localStorage.setItem('bcvRate', rate.toString());
-                return rate;
-            }
-        } catch (error) {
-            console.error('Error fetching BCV rate:', error);
-        }
-        return null;
-    };
+    // --- Effects ---
 
-    // Fetch Binance P2P real rate (USDT/VES) using the search endpoint via local proxy
-    const fetchBinanceRate = async () => {
-        try {
-            // Updated to use our new Vite proxy configured in vite.config.js
-            const binanceProxyUrl = '/api-binance/bapi/c2c/v2/friendly/c2c/adv/search';
-
-            const response = await fetch(binanceProxyUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': '*/*',
-                },
-                body: JSON.stringify({
-                    asset: 'USDT',
-                    fiat: 'VES',
-                    merchantCheck: true,
-                    page: 1,
-                    rows: 10,
-                    tradeType: 'SELL'
-                })
-            });
-
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-            const data = await response.json();
-            if (data?.data && data.data.length > 0) {
-                // We take the average of the top 10 advertisers
-                const prices = data.data.map(ad => parseFloat(ad.adv.price));
-                const avgRate = Math.round((prices.reduce((a, b) => a + b, 0) / prices.length) * 100) / 100;
-
-                setBinanceRate(avgRate);
-                localStorage.setItem('binanceRate', avgRate.toString());
-                return avgRate;
-            } else {
-                console.warn('No data received from Binance API through proxy');
-                throw new Error('No data from Binance');
-            }
-        } catch (error) {
-            console.error('Error fetching Binance rate via proxy:', error);
-
-            // Fallback: load last saved or try dolarapi if proxy fails
-            const saved = localStorage.getItem('binanceRate');
-            if (saved) {
-                const rate = parseFloat(saved);
-                setBinanceRate(rate);
-                return rate;
-            }
-
-            // Ultimate fallback to Paralelo if nothing else works
-            try {
-                const response = await fetch('https://ve.dolarapi.com/v1/dolares');
-                const data = await response.json();
-                const paraleloRate = data.find(item => item.fuente === 'paralelo');
-                if (paraleloRate?.promedio) {
-                    const rate = Math.round(paraleloRate.promedio * 100) / 100;
-                    setBinanceRate(rate);
-                    return rate;
-                }
-            } catch (e) {
-                console.error('Total fallback failed:', e);
-            }
-        }
-        return null;
-    };
-
-    // Fetch all rates
-    const fetchAllRates = async () => {
-        setLoadingRates(true);
-        await Promise.all([fetchBcvRate(), fetchBinanceRate()]);
-        setLoadingRates(false);
-    };
-
-    // Auto-update rates on mount and every 5 minutes
-    useEffect(() => {
-        // Load saved rates
-        const savedBcv = localStorage.getItem('bcvRate');
-        const savedBinance = localStorage.getItem('binanceRate');
-        const savedType = localStorage.getItem('selectedRateType') || 'bcv';
-
-        if (savedBcv) setBcvRate(parseFloat(savedBcv));
-        if (savedBinance) setBinanceRate(parseFloat(savedBinance));
-        setSelectedRateType(savedType);
-
-        // Fetch fresh rates
-        fetchAllRates();
-
-        // Auto-update every 5 minutes
-        const interval = setInterval(fetchAllRates, 5 * 60 * 1000);
-        return () => clearInterval(interval);
-    }, []);
-
-    // Update exchangeRate when selection changes
     useEffect(() => {
         const rate = selectedRateType === 'bcv' ? bcvRate : binanceRate;
         setExchangeRate(rate);
         localStorage.setItem('selectedRateType', selectedRateType);
     }, [selectedRateType, bcvRate, binanceRate]);
 
-    // Filter products with useMemo to avoid recalculation on every render
-    const filteredProducts = useMemo(() => {
-        if (!searchTerm) return products;
-        const term = searchTerm.toLowerCase();
-        return products.filter(p =>
-            p.sku?.toLowerCase().includes(term) ||
-            p.description?.toLowerCase().includes(term) ||
-            p.reference?.toLowerCase().includes(term)
-        );
-    }, [products, searchTerm]);
+    useEffect(() => {
+        localStorage.setItem('pos_carts', JSON.stringify(carts));
+    }, [carts]);
 
-    // Cart calculations
-    const subtotal = cart.reduce((sum, item) => sum + (item.priceUSD * item.qty), 0);
+    useEffect(() => {
+        localStorage.setItem('pos_active_cart_id', activeCartId.toString());
+    }, [activeCartId]);
+
+
+
+    // --- Actions ---
+
+    const addNewCart = () => {
+        if (carts.length >= 5) {
+            alert('Máximo 5 carritos simultáneos permitidos');
+            return;
+        }
+        const newId = Math.max(...carts.map(c => c.id), 0) + 1;
+        const newCart = createEmptyCart(newId);
+        setCarts([...carts, newCart]);
+        setActiveCartId(newId);
+    };
+
+    const switchCart = (cartId) => {
+        setActiveCartId(cartId);
+    };
+
+    const closeCart = (cartId) => {
+        const cartToClose = carts.find(c => c.id === cartId);
+        if (cartToClose?.items.length > 0) {
+            if (!window.confirm(`¿Cerrar carrito con ${cartToClose.items.length} producto(s)?`)) return;
+        }
+
+        if (carts.length === 1) {
+            setCarts([createEmptyCart(1)]);
+            setActiveCartId(1);
+            return;
+        }
+
+        const remaining = carts.filter(c => c.id !== cartId);
+        setCarts(remaining);
+        if (activeCartId === cartId) setActiveCartId(remaining[0].id);
+    };
+
+    const updateActiveCart = (updates) => {
+        setCarts(carts.map(c => c.id === activeCartId ? { ...c, ...updates } : c));
+    };
+
+    // --- Search & Filters ---
+
+    const debouncedPOSSearch = useCallback(
+        debounce((term) => {
+            if (!term || !term.trim()) {
+                setSearchResults([]);
+                return;
+            }
+            const termLower = term.toLowerCase().trim();
+            const results = products.filter(p => {
+                const desc = (p.description || '').toLowerCase();
+                const sku = (p.sku || '').toLowerCase();
+                const ref = (p.reference || '').toLowerCase();
+                return desc.includes(termLower) || sku.includes(termLower) || ref.includes(termLower);
+            });
+            setSearchResults(results.slice(0, 100));
+        }, 300),
+        [products]
+    );
+
+    const handleSearchChange = (e) => {
+        const term = e.target.value;
+        setSearchTerm(term);
+        debouncedPOSSearch(term);
+    };
+
+    const filteredProducts = useMemo(() => {
+        if (searchTerm) return searchResults;
+        return products;
+    }, [products, searchTerm, searchResults]);
+
+    // --- Calculations ---
+
+    const subtotal = activeCartItems.reduce((sum, item) => sum + ((item.priceUSD || 0) * (item.qty || 0)), 0);
     const iva = documentType === 'factura' ? subtotal * 0.16 : 0;
     const total = subtotal + iva;
-    const totalBs = total * exchangeRate;
+    const totalBs = total * (exchangeRate || 0);
 
-    // Add to cart
+    const totalPaid = paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const remainingToPay = total - totalPaid;
+    const isFullyPaid = totalPaid >= total - 0.01; // Small tolerance
+
+    // Automatic recovery from corrupted state
+    useEffect(() => {
+        if (Number.isNaN(total) || Number.isNaN(totalBs)) {
+            console.warn('⚠️ Detected NaN values in POS. Resetting state...');
+            try {
+                // Only reset if things are truly broken
+                updateActiveCart({ items: [], paymentMethods: [] });
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    }, [total, totalBs]);
+
+    // --- Cart Management ---
+
     const addToCart = (product) => {
-        const existing = cart.find(item => item.productId === product.id);
+        const existing = activeCart.items.find(item => item.productId === product.id);
         const isQuote = posMode === 'quote';
 
         if (existing) {
-            setCart(cart.map(item =>
+            const updatedItems = activeCart.items.map(item =>
                 item.productId === product.id
-                    // In quote mode, no stock limit
                     ? { ...item, qty: isQuote ? item.qty + 1 : Math.min(item.qty + 1, product.quantity) }
                     : item
-            ));
+            );
+            updateActiveCart({ items: updatedItems });
         } else {
-            setCart([...cart, {
+            const newItem = {
                 productId: product.id,
                 sku: product.sku,
                 reference: product.reference || product.sku,
@@ -214,894 +287,866 @@ const POS = () => {
                 location: product.location || '',
                 priceUSD: product.price || 0,
                 qty: 1,
-                maxQty: isQuote ? 9999 : product.quantity // No limit in quote mode
-            }]);
+                maxQty: isQuote ? 9999 : product.quantity
+            };
+            updateActiveCart({ items: [...activeCart.items, newItem] });
         }
     };
 
-    // Update cart item
     const updateCartItem = (index, field, value) => {
-        setCart(cart.map((item, i) =>
-            i === index ? { ...item, [field]: value } : item
-        ));
+        const updatedItems = activeCart.items.map((item, i) => i === index ? { ...item, [field]: value } : item);
+        updateActiveCart({ items: updatedItems });
     };
 
-    // Remove from cart
     const removeFromCart = (index) => {
-        setCart(cart.filter((_, i) => i !== index));
+        const updatedItems = activeCart.items.filter((_, i) => i !== index);
+        updateActiveCart({ items: updatedItems });
     };
 
-    /* REMOVED: Customers loaded via context
-    // Load customers
-    const loadCustomers = async () => {
-        ...
-    };
+    // --- Customer Management ---
 
-    useEffect(() => {
-        if (step === 2) loadCustomers();
-    }, [step, currentCompany?.id]);
-    */
-
-    // Create customer
     const createCustomer = async () => {
-        if (!newCustomer.name || !currentCompany?.id) {
-            alert('Por favor ingresa al menos el nombre del cliente');
-            return;
-        }
+        if (!newCustomer.name || !currentCompany?.id) return alert('Nombre requerido');
         try {
             const id = await addCustomer(newCustomer);
             const created = { id, ...newCustomer, companyId: currentCompany.id };
-            setSelectedCustomer(created);
-            setCustomerType('existing');
-            // Context will auto-update customers list
-
-            // Reset form
-            setNewCustomer({
-                type: 'V', name: '', rif: '', phone: '', address: ''
-            });
-            alert(`Cliente "${created.name}" creado exitosamente`);
+            updateActiveCart({ customer: created, customerType: 'existing', newCustomer: { type: 'V', name: '', rif: '', phone: '', address: '' } });
+            alert(`Cliente "${created.name}" creado`);
         } catch (err) {
-            console.error('Error creating customer:', err);
-            alert('Error al crear el cliente. Por favor intenta de nuevo.');
+            console.error(err);
+            alert('Error al crear cliente');
         }
     };
 
-    // Finalize sale
+    // --- Payment Management ---
+
+    const addPaymentMethod = (method) => {
+        const remaining = Math.max(0, remainingToPay);
+        const newPayment = {
+            method,
+            amount: remaining,
+            currency: PAYMENT_METHODS[method].currency,
+            reference: ''
+        };
+        updateActiveCart({ paymentMethods: [...paymentMethods, newPayment] });
+    };
+
+    const updatePayment = (index, field, value) => {
+        const updated = [...paymentMethods];
+        updated[index] = { ...updated[index], [field]: value };
+        updateActiveCart({ paymentMethods: updated });
+    };
+
+    const removePayment = (index) => {
+        updateActiveCart({ paymentMethods: paymentMethods.filter((_, i) => i !== index) });
+    };
+
+    // --- Finalize Sale ---
+
     const finalizeSale = async () => {
-        if (cart.length === 0) return;
+        if (activeCartItems.length === 0) return;
+        // Logic to validate payment if 'contado'
+        if (saleType === 'contado' && !isFullyPaid && !posMode === 'quote') {
+            alert('El monto pagado debe cubrir el total de la venta.');
+            return;
+        }
 
-        const userName = auth.currentUser?.displayName || auth.currentUser?.email || 'Usuario';
         const isQuote = posMode === 'quote';
-
-        // Calculate due date for credit sales
+        // Date calc
         const today = new Date();
         const dueDate = saleType === 'credito'
             ? new Date(today.getTime() + (creditDays * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]
             : null;
 
-        // For quotes: set expiration at midnight Venezuela time (UTC-4)
         let expiresAt = null;
         if (isQuote) {
             const midnight = new Date();
-            midnight.setHours(23, 59, 59, 999); // End of today
+            midnight.setHours(23, 59, 59, 999);
             expiresAt = midnight.toISOString();
         }
 
-        // Generate document number (simple sequential based on today's sales count)
+        // Generate ID
         const todaySales = sales.filter(s => s.date === today.toISOString().split('T')[0]);
         const prefix = isQuote ? 'PR-' : '';
         const newDocNumber = prefix + String(todaySales.length + 1).padStart(6, '0');
 
-        const saleItems = cart.map(item => ({
-            productId: item.productId,
+        const saleItems = activeCartItems.map(item => ({
+            product_id: item.productId,
             sku: item.sku,
-            reference: item.reference || item.sku,
+            reference: item.reference || '',
             description: item.description,
             quantity: item.qty,
-            unitPrice: item.priceUSD,
-            amountUSD: item.priceUSD * item.qty,
-            amountBs: item.priceUSD * item.qty * exchangeRate,
+            unit_price: item.priceUSD,
+            amount_usd: item.priceUSD * item.qty,
+            amount_bs: item.priceUSD * item.qty * exchangeRate,
             date: today.toISOString().split('T')[0],
-            paymentType: isQuote ? 'presupuesto' : saleType,
-            creditDays: saleType === 'credito' ? creditDays : null,
-            dueDate,
-            paymentCurrency: 'USD',
-            exchangeRate,
-            documentType: isQuote ? 'presupuesto' : documentType,
-            documentNumber: newDocNumber,
-            hasIVA: documentType === 'factura' && !isQuote,
-            ivaAmount: (documentType === 'factura' && !isQuote) ? (item.priceUSD * item.qty) * 0.16 : 0,
-            customer: customerType === 'quick' ? null : selectedCustomer,
-            customerId: customerType === 'quick' ? null : selectedCustomer?.id,
-            // Quote specific fields
-            isQuote,
-            expiresAt,
-            // For accounts receivable
+            payment_type: isQuote ? 'presupuesto' : saleType,
+            credit_days: saleType === 'credito' ? creditDays : null,
+            due_date: dueDate,
+            payment_currency: 'USD',
+            exchange_rate: exchangeRate,
+            document_type: isQuote ? 'presupuesto' : documentType,
+            document_number: newDocNumber,
+            has_iva: documentType === 'factura' && !isQuote,
+            iva_amount: (documentType === 'factura' && !isQuote) ? (item.priceUSD * item.qty) * 0.16 : 0,
+            customer_id: customerType === 'quick' ? null : customer?.id,
+            is_quote: isQuote,
+            expires_at: expiresAt,
             status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
-            paidAmount: (saleType === 'credito' || isQuote) ? 0 : (item.priceUSD * item.qty),
-            remainingAmount: (saleType === 'credito' || isQuote) ? (item.priceUSD * item.qty) : 0
+            payment_status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
+            paid_amount: (saleType === 'credito' || isQuote) ? 0 : (item.priceUSD * item.qty),
+            remaining_amount: (saleType === 'credito' || isQuote) ? (item.priceUSD * item.qty) : 0
         }));
 
-        await addSale(saleItems, userName);
+        try {
+            // Add sales and payments
+            for (const item of saleItems) {
+                // Pass payment methods only for the first item (or handle batch logic on backend, keep simple here)
+                // NOTE: `addSale` implementation handles creating cash_transactions if paymentMethods provided
+                // We should only pass payment methods once per "Ticket", but currently our DB structure is 1 row per item.
+                // Ideally we'd have a Sales Header. For now, we attach payments to the *first* item or handle logic to not dupe.
+                // Improving: To avoid duplicate payment entries if calling addSale multiple times, we'll only pass payment info
+                // on the first item, OR better, refactor `addSale` to batch.
+                // Given constraints, I will pass payments on the FIRST item.
+                const isFirst = item === saleItems[0];
+                const paymentsToPass = (isFirst && !isQuote && saleType === 'contado') ? paymentMethods : [];
 
-        // Prepare completed sale data for document view
-        setCompletedSale({
-            items: cart.map(item => ({
-                ...item,
-                reference: item.reference || item.sku
-            })),
-            customer: customerType === 'quick' ? null : selectedCustomer,
-            documentType: isQuote ? 'presupuesto' : documentType,
-            paymentType: isQuote ? 'presupuesto' : saleType,
-            creditDays: saleType === 'credito' ? creditDays : null,
-            dueDate,
-            subtotal,
-            iva: isQuote ? 0 : iva,
-            total: isQuote ? subtotal : total,
-            totalBs: isQuote ? subtotal * exchangeRate : totalBs,
-            exchangeRate,
-            date: today.toISOString(),
-            isQuote,
-            expiresAt
-        });
-        setDocumentNumber(newDocNumber);
+                await addSale(item, paymentsToPass);
+            }
 
-        // Move to document view step
-        setStep(5);
+            // Success State
+            setCompletedSale({
+                items: activeCartItems,
+                customer: customerType === 'quick' ? null : customer,
+                documentType: isQuote ? 'presupuesto' : documentType,
+                paymentType: isQuote ? 'presupuesto' : saleType,
+                creditDays: saleType === 'credito' ? creditDays : null,
+                dueDate,
+                subtotal,
+                iva,
+                total,
+                totalBs,
+                exchangeRate,
+                date: today.toISOString(),
+                isQuote,
+                expiresAt,
+                documentNumber: newDocNumber
+            });
+            setDocumentNumber(newDocNumber);
+            updateActiveCart({ step: 5 }); // Success screen
+
+        } catch (error) {
+            console.error('Finalize Sale Error:', error);
+            alert('Error al finalizar la venta');
+        }
     };
 
-    // Reset and start new sale
     const startNewSale = () => {
-        setCart([]);
-        setStep(1);
-        setSelectedCustomer(null);
-        setCustomerType('quick');
-        setSaleType('contado');
-        setCreditDays(30);
-        setDocumentType('pedido');
         setCompletedSale(null);
-        setDocumentNumber('');
+        closeCart(activeCartId);
+    };
+
+    // --- Render Helpers ---
+
+    const WizardStep = ({ id, label, icon: Icon }) => {
+        const isActive = step === id;
+        const isCompleted = step > id;
+        return (
+            <div
+                onClick={() => id < step && updateActiveCart({ step: id })} // Can go back
+                style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    background: isActive ? 'var(--primary)' : isCompleted ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-card)',
+                    borderRadius: 'var(--radius-md)',
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    cursor: id < step ? 'pointer' : 'default',
+                    color: isActive ? 'white' : isCompleted ? 'var(--success)' : 'var(--text-secondary)',
+                    border: `1px solid ${isActive ? 'var(--primary)' : isCompleted ? 'var(--success)' : 'var(--border-color)'}`,
+                    transition: 'all 0.2s'
+                }}
+            >
+                <div style={{
+                    width: '24px', height: '24px', borderRadius: '50%',
+                    background: isActive ? 'white' : isCompleted ? 'var(--success)' : 'var(--bg-secondary)',
+                    color: isActive ? 'var(--primary)' : isCompleted ? 'white' : 'var(--text-secondary)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 'bold'
+                }}>
+                    {isCompleted ? <CheckCircle size={14} /> : id}
+                </div>
+                <span style={{ fontWeight: isActive ? '600' : '400', display: 'none', '@media (min-width: 768px)': { display: 'block' } }}>{label}</span>
+                <span className="hidden md:inline">{label}</span>
+            </div>
+        );
     };
 
     return (
-        <div className="animate-fade-in" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            {/* Header */}
-            <header style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                    <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <ShoppingCart size={28} /> Punto de Venta
+        <div className="animate-fade-in" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* TOP BAR: Title | Multicart | Rates */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+
+                {/* 1. Title & Actions */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '2rem', margin: 0 }}>
+                        <ShoppingCart size={32} /> Punto de Venta
                     </h1>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        {/* Mode Selector */}
-                        <div style={{
-                            display: 'flex',
-                            background: 'var(--bg-secondary)',
-                            borderRadius: 'var(--radius-md)',
-                            padding: '3px',
-                            gap: '2px'
-                        }}>
-                            <button
-                                onClick={() => { setPosMode('sale'); setCart([]); }}
-                                style={{
-                                    padding: '0.25rem 0.75rem',
-                                    borderRadius: 'var(--radius-sm)',
-                                    border: 'none',
-                                    background: posMode === 'sale' ? 'var(--primary)' : 'transparent',
-                                    color: posMode === 'sale' ? 'white' : 'var(--text-secondary)',
-                                    fontWeight: 500,
-                                    fontSize: '0.8rem',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                            >
-                                💰 Venta
-                            </button>
-                            <button
-                                onClick={() => { setPosMode('quote'); setCart([]); }}
-                                style={{
-                                    padding: '0.25rem 0.75rem',
-                                    borderRadius: 'var(--radius-sm)',
-                                    border: 'none',
-                                    background: posMode === 'quote' ? '#f59e0b' : 'transparent',
-                                    color: posMode === 'quote' ? 'white' : 'var(--text-secondary)',
-                                    fontWeight: 500,
-                                    fontSize: '0.8rem',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                            >
-                                📋 Presupuesto
-                            </button>
-                        </div>
+
+                    {/* Action Toolbar (Venta/Presupuesto/Daily) */}
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
                         <button
-                            onClick={() => setShowSalesModal(true)}
-                            className="btn btn-secondary"
+                            onClick={() => setPosMode('sale')}
                             style={{
-                                padding: '0.25rem 0.75rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                fontSize: '0.75rem',
-                                height: 'auto'
+                                padding: '0.35rem 0.85rem', borderRadius: '20px',
+                                border: 'none',
+                                background: posMode === 'sale' ? '#cbd5e1' : 'transparent',
+                                color: posMode === 'sale' ? '#ea580c' : 'var(--text-secondary)',
+                                cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600',
+                                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                transition: 'all 0.2s',
+                                boxShadow: posMode === 'sale' ? 'inset 0 2px 4px rgba(0,0,0,0.05)' : 'none'
                             }}
                         >
-                            <ClipboardList size={14} />
-                            <span>Ventas del Día</span>
+                            <span style={{ fontSize: '1rem' }}>🔥</span> Venta
+                        </button>
+                        <button
+                            onClick={() => setPosMode('quote')}
+                            style={{
+                                padding: '0.35rem 0.85rem', borderRadius: '20px',
+                                border: 'none',
+                                background: posMode === 'quote' ? '#cbd5e1' : 'transparent',
+                                color: posMode === 'quote' ? '#ea580c' : 'var(--text-secondary)',
+                                cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600',
+                                display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                transition: 'all 0.2s',
+                                boxShadow: posMode === 'quote' ? 'inset 0 2px 4px rgba(0,0,0,0.05)' : 'none'
+                            }}
+                        >
+                            <FileCheck size={14} className={posMode === 'quote' ? 'text-orange-600' : 'text-slate-500'} /> Presupuesto
+                        </button>
+                        <button
+                            onClick={() => setShowSalesModal(true)}
+                            style={{
+                                padding: '0.35rem 0.85rem', borderRadius: '20px',
+                                border: '1px solid #cbd5e1',
+                                background: '#f8fafc',
+                                color: '#475569',
+                                cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600',
+                                display: 'flex', alignItems: 'center', gap: '0.4rem'
+                            }}
+                        >
+                            <List size={14} /> Ventas del Día
                         </button>
                     </div>
                 </div>
 
-                {/* Exchange Rates Display */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    {/* BCV Rate */}
-                    <div
-                        onClick={() => setSelectedRateType('bcv')}
-                        style={{
-                            padding: '0.5rem 0.75rem',
-                            borderRadius: 'var(--radius-md)',
-                            background: selectedRateType === 'bcv' ? 'rgba(34, 197, 94, 0.2)' : 'var(--bg-card)',
-                            border: selectedRateType === 'bcv' ? '2px solid #22c55e' : '1px solid var(--border-color)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                        }}
-                    >
-                        <div style={{ fontSize: '0.65rem', color: '#22c55e', fontWeight: 'bold', textTransform: 'uppercase' }}>BCV</div>
-                        <div style={{ fontWeight: 'bold', color: '#22c55e', fontSize: '1rem' }}>
-                            {bcvRate.toFixed(2)} <span style={{ fontSize: '0.7rem' }}>Bs/$</span>
+                {/* 2. Multi-Cart Tabs (Center) */}
+                <div style={{ background: '#94a3b8', padding: '0.35rem 1rem', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '1.5rem', minWidth: '300px', justifyContent: 'center' }}>
+                    {carts.map(c => (
+                        <div
+                            key={c.id}
+                            onClick={() => switchCart(c.id)}
+                            style={{
+                                cursor: 'pointer',
+                                color: activeCartId === c.id ? 'white' : 'rgba(255,255,255,0.7)',
+                                fontWeight: activeCartId === c.id ? 'bold' : 'normal',
+                                display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem',
+                            }}
+                        >
+                            <ShoppingCart size={16} /> Carrito {c.id}
+                            {activeCartId === c.id && (
+                                <span style={{ background: 'rgba(255,255,255,0.3)', color: 'white', fontSize: '0.75rem', padding: '1px 6px', borderRadius: '10px', minWidth: '20px', textAlign: 'center' }}>
+                                    {c.items.length}
+                                </span>
+                            )}
+                            {carts.length > 1 && (
+                                <X size={12} onClick={(e) => { e.stopPropagation(); closeCart(c.id); }} style={{ opacity: 0.6, cursor: 'pointer' }} />
+                            )}
+                        </div>
+                    ))}
+                    {carts.length < 5 && (
+                        <button
+                            onClick={addNewCart}
+                            style={{
+                                border: '1px solid #94a3b8', background: '#e2e8f0',
+                                color: '#475569', borderRadius: '20px', padding: '0.3rem 1rem',
+                                cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.25rem',
+                                fontWeight: '600'
+                            }}
+                        >
+                            <Plus size={14} /> Nuevo Carrito
+                        </button>
+                    )}
+                </div>
+
+                {/* 3. Rates (Right) */}
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <div
+                            onClick={() => setSelectedRateType('bcv')}
+                            style={{
+                                padding: '0.5rem 1rem', borderRadius: '12px',
+                                border: '2px solid ' + (selectedRateType === 'bcv' ? '#22c55e' : 'transparent'),
+                                background: '#dcfce7', // light green
+                                cursor: 'pointer', minWidth: '100px'
+                            }}
+                        >
+                            <div style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: '800', letterSpacing: '0.5px' }}>BCV</div>
+                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#166534' }}>{(bcvRate || 0).toFixed(2)} <span style={{ fontSize: '0.7rem' }}>Bs/$</span></div>
+                        </div>
+                        <div
+                            onClick={() => setSelectedRateType('binance')}
+                            style={{
+                                padding: '0.5rem 1rem', borderRadius: '12px',
+                                border: '2px solid ' + (selectedRateType === 'binance' ? '#eab308' : 'transparent'),
+                                background: '#fef9c3', // light yellow
+                                cursor: 'pointer', minWidth: '100px'
+                            }}
+                        >
+                            <div style={{ fontSize: '0.7rem', color: '#a16207', fontWeight: '800', letterSpacing: '0.5px' }}>BINANCE</div>
+                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#854d0e' }}>{(binanceRate || 0).toFixed(2)} <span style={{ fontSize: '0.7rem' }}>Bs/$</span></div>
                         </div>
                     </div>
-
-                    {/* Binance Rate - Editable */}
-                    <div
-                        onClick={() => setSelectedRateType('binance')}
-                        style={{
-                            padding: '0.5rem 0.75rem',
-                            borderRadius: 'var(--radius-md)',
-                            background: selectedRateType === 'binance' ? 'rgba(234, 179, 8, 0.2)' : 'var(--bg-card)',
-                            border: selectedRateType === 'binance' ? '2px solid #eab308' : '1px solid var(--border-color)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                        }}
-                    >
-                        <div style={{ fontSize: '0.65rem', color: '#eab308', fontWeight: 'bold', textTransform: 'uppercase' }}>BINANCE</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={binanceRate}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                    const newRate = parseFloat(e.target.value) || 0;
-                                    setBinanceRate(newRate);
-                                    localStorage.setItem('binanceRate', newRate.toString());
-                                }}
-                                style={{
-                                    width: '70px',
-                                    textAlign: 'right',
-                                    fontWeight: 'bold',
-                                    color: '#eab308',
-                                    background: 'transparent',
-                                    border: 'none',
-                                    borderBottom: '1px dashed #eab308',
-                                    fontSize: '1rem',
-                                    padding: '0'
-                                }}
-                            />
-                            <span style={{ fontSize: '0.7rem', color: '#eab308' }}>Bs/$</span>
-                        </div>
-                    </div>
-
-                    {/* Refresh Button */}
-                    <button
-                        onClick={fetchAllRates}
-                        disabled={loadingRates}
-                        className="btn btn-secondary"
-                        style={{ padding: '0.5rem' }}
-                        title="Actualizar tasas"
-                    >
-                        <RefreshCw size={16} className={loadingRates ? 'spin' : ''} />
+                    <button onClick={refreshRates} className="btn-icon" style={{ background: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-sm)' }}>
+                        <RefreshCw size={18} className={loadingRates ? 'spinning' : ''} />
                     </button>
                 </div>
-            </header>
 
-            {/* Progress Steps */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                {steps.map((s, i) => {
-                    const StepIcon = s.icon;
+            </div>
+
+            {/* DAILY STATS BAR */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                {/* Pending */}
+                <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--warning)', marginBottom: '0.25rem' }}>⏳ ENVIADO A CAJA</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dailyStats.pendingCount} pendientes</div>
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--warning)' }}>${dailyStats.pendingUSD.toFixed(2)}</div>
+                </div>
+
+                {/* Processed */}
+                <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--success)', marginBottom: '0.25rem' }}>✅ COBRADO</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{dailyStats.processedCount} procesadas</div>
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)' }}>${dailyStats.processedUSD.toFixed(2)}</div>
+                </div>
+
+                {/* Total */}
+                <div style={{ background: 'white', border: '1px solid var(--border-color)', padding: '0.75rem 1rem', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: 'var(--shadow-sm)' }}>
+                    <div>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>TOTAL GENERADO</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Total del día</div>
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>${dailyStats.totalUSD.toFixed(2)}</div>
+                </div>
+            </div>
+
+            {/* NAVIGATION BAR (Tab Style) */}
+            <div style={{ display: 'flex', gap: '1rem', background: 'transparent' }}>
+                {[
+                    { id: 1, label: 'Productos', icon: Package },
+                    { id: 2, label: 'Cliente', icon: User },
+                    { id: 3, label: 'Tipo Venta', icon: Receipt },
+                    { id: 4, label: 'Documento', icon: FileCheck }, // Split Document/Tipo logic slightly in nav? Or just labels
+                    { id: 5, label: 'Listo', icon: CheckCircle }
+                ].map((s) => {
+                    // Hide "Documento" or merge steps if needed, but per image there are 5 tabs: Products, Client, SalesType, Doc, Ready
+                    // My internal logic has: 1: Prod, 2: Client, 3: Type(Contado/Credito + DocType), 4: Payment, 5: Success
+                    // I will align the tabs to my internal state for now.
+                    // Step 3 in my code handles both SaleType and DocType. 
+                    // Step 4 is Payment. 
+                    // Let's Map: 1->Productos, 2->Cliente, 3->Tipo Venta, 4->Documento/Pago? 
+                    // The user image labels: Productos, Cliente, Tipo Venta, Documento, Listo.
+                    // I'll adjust the mapped labels to my steps.
+                    // My Step 4 is Payment. I'll label it "Pago" or align with "Documento" if that makes sense?
+                    // Let's stick to my steps for functionality: 1:Prod, 2:Cust, 3:Type, 4:Pay, 5:Done.
+                    let label = s.label;
+                    if (s.id === 3) label = 'Tipo Venta';
+                    if (s.id === 4) label = 'Pago'; // Renaming Documento to Pago to match logic, or changing logic. 
+                    // Wait, image says "Documento". Maybe they want Document details there?
+                    // I'll stick to functional "Pago" for step 4 label for now, or "Facturación".
+
+                    // ACTUALLY, I will strictly follow image visual but map to functionality.
+                    // Image: 5 tabs.
+                    // My steps: 1, 2, 3, 4, 5. Perfect match.
+                    // Label 4: "Documento" in image. I will call it "Pago" in logic but display "Documento"? 
+                    // No, "Pago" is crucial. The image might be a different flow.
+                    // I will label Step 4 "Pago / Documento" or just "Pago". 
+                    // Let's use the image labels but mapped to my steps.
+                    const labels = { 1: 'Productos', 2: 'Cliente', 3: 'Tipo Venta', 4: 'Documento', 5: 'Listo' };
                     const isActive = step === s.id;
-                    const isCompleted = step > s.id;
                     return (
                         <div
                             key={s.id}
-                            onClick={() => s.id < step && setStep(s.id)}
+                            onClick={() => s.id < step && updateActiveCart({ step: s.id })}
                             style={{
                                 flex: 1,
-                                padding: '0.75rem',
-                                background: isActive ? 'var(--accent-primary)' : isCompleted ? 'rgba(34,197,94,0.2)' : 'var(--bg-card)',
-                                borderRadius: 'var(--radius-md)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
+                                background: isActive ? 'var(--primary)' : 'white',
+                                color: isActive ? 'white' : 'var(--text-secondary)',
+                                padding: '1rem',
+                                borderRadius: 'var(--radius-lg)',
+                                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                boxShadow: 'var(--shadow-sm)',
                                 cursor: s.id < step ? 'pointer' : 'default',
-                                color: isActive ? 'white' : isCompleted ? 'var(--success)' : 'var(--text-secondary)',
-                                border: `1px solid ${isActive ? 'var(--accent-primary)' : 'var(--border-color)'}`
+                                opacity: s.id > step && !isActive ? 0.7 : 1,
+                                transition: 'all 0.2s',
+                                border: isActive ? 'none' : '1px solid transparent'
                             }}
                         >
-                            <StepIcon size={20} />
-                            <span style={{ fontWeight: isActive ? 'bold' : 'normal' }}>{s.label}</span>
+                            <div style={{
+                                background: isActive ? 'rgba(255,255,255,0.2)' : 'var(--bg-secondary)',
+                                borderRadius: '50%', width: '28px', height: '28px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: isActive ? 'white' : 'var(--text-secondary)'
+                            }}>
+                                <s.icon size={16} />
+                            </div>
+                            <span style={{ fontWeight: isActive ? '700' : '500', fontSize: '1rem' }}>{labels[s.id]}</span>
                         </div>
                     );
                 })}
             </div>
 
-            {/* Main Content */}
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: step === 1 ? '1fr 350px' : '1fr', gap: '1rem', minHeight: 0 }}>
 
-                {/* Step 1: Products */}
+
+            {/* Content Area */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: step === 1 ? '1fr 400px' : '1fr', gap: '1.5rem', minHeight: 0, overflow: 'hidden' }}>
+
+                {/* STEP 1: PRODUCTS */}
                 {step === 1 && (
                     <>
-                        <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 280px)' }}>
-                            <div style={{ marginBottom: '1rem' }}>
+                        {/* Product List */}
+                        {/* Product Search & Result Dropdown */}
+                        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', background: 'white', border: 'none', boxShadow: 'var(--shadow-sm)', overflow: 'visible', zIndex: 50 }}>
+                            <div style={{ padding: '1.5rem', position: 'relative' }}>
                                 <div style={{ position: 'relative' }}>
-                                    <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                                    <Search size={20} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
                                     <input
                                         type="text"
+                                        placeholder="🔍 Buscar producto por Código, Nombre o Referencia..."
                                         value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        placeholder="Buscar por SKU, descripción o referencia..."
-                                        style={{ paddingLeft: '2.5rem', width: '100%' }}
+                                        onChange={handleSearchChange}
+                                        autoFocus
+                                        style={{
+                                            width: '100%',
+                                            padding: '1rem 1rem 1rem 3rem',
+                                            borderRadius: '12px',
+                                            border: '2px solid #e2e8f0',
+                                            background: '#f8fafc',
+                                            color: 'var(--text-primary)',
+                                            boxShadow: 'none',
+                                            fontSize: '1rem',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onFocus={(e) => e.target.style.borderColor = 'var(--primary)'}
+                                        onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
                                     />
+                                    {searchTerm && (
+                                        <button
+                                            onClick={() => { setSearchTerm(''); setSearchResults([]); }}
+                                            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    )}
                                 </div>
+
+                                {/* Dropdown Results */}
+                                {searchTerm.length > 0 && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '100%', left: '1.5rem', right: '1.5rem',
+                                        background: 'white',
+                                        borderRadius: '0 0 12px 12px',
+                                        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                                        border: '1px solid #e2e8f0',
+                                        borderTop: 'none',
+                                        maxHeight: '400px',
+                                        overflowY: 'auto',
+                                        zIndex: 100
+                                    }}>
+                                        {filteredProducts.length === 0 ? (
+                                            <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>
+                                                <Package size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                                                <div>No se encontraron productos</div>
+                                            </div>
+                                        ) : (
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                                                <thead>
+                                                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.8rem', textAlign: 'left' }}>
+                                                        <th style={{ padding: '0.75rem 1rem' }}>Descripción</th>
+                                                        <th style={{ padding: '0.75rem 1rem' }}>SKU / Ref</th>
+                                                        <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Precio</th>
+                                                        <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>Stock</th>
+                                                        <th style={{ padding: '0.75rem 1rem' }}></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {filteredProducts.map(p => (
+                                                        <tr
+                                                            key={p.id}
+                                                            onClick={() => {
+                                                                addToCart(p);
+                                                                // Search remains open
+                                                            }}
+                                                            style={{
+                                                                borderBottom: '1px solid #f1f5f9',
+                                                                cursor: 'pointer',
+                                                                transition: 'background 0.1s'
+                                                            }}
+                                                            className="hover:bg-slate-50"
+                                                            onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                                            onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+                                                        >
+                                                            <td style={{ padding: '0.75rem 1rem', fontWeight: '600', color: '#1e293b' }}>
+                                                                {p.description}
+                                                                {p.brand && <div style={{ fontSize: '0.75rem', color: '#475569', fontWeight: '500' }}>{p.brand}</div>}
+                                                            </td>
+                                                            <td style={{ padding: '0.75rem 1rem', color: '#64748b', fontSize: '0.85rem' }}>
+                                                                <div>{p.sku}</div>
+                                                                {p.reference && <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Ref: {p.reference}</div>}
+                                                            </td>
+                                                            <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 'bold', color: 'var(--success)' }}>
+                                                                ${(p.price || 0).toFixed(2)}
+                                                            </td>
+                                                            <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
+                                                                <span className={`badge ${p.quantity > 0 ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.75rem' }}>
+                                                                    {p.quantity}
+                                                                </span>
+                                                            </td>
+                                                            <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                                                                <button className="btn-sm btn-primary" style={{ borderRadius: '20px', padding: '0.2rem 0.8rem' }}>
+                                                                    <Plus size={14} /> Agregar
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                    <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 1 }}>
-                                        <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Referencia</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Descripción</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Marca</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'right', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Precio</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Stock</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredProducts.map(product => (
-                                            <tr
-                                                key={product.id}
-                                                onClick={() => product.quantity > 0 && addToCart(product)}
-                                                style={{
-                                                    borderBottom: '1px solid var(--border-color)',
-                                                    cursor: product.quantity > 0 ? 'pointer' : 'not-allowed',
-                                                    opacity: product.quantity > 0 ? 1 : 0.5,
-                                                    transition: 'background 0.2s'
-                                                }}
-                                                className="hover:bg-slate-800"
-                                            >
-                                                <td style={{ padding: '0.75rem', fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
-                                                    {product.reference || '-'}
-                                                </td>
-                                                <td style={{ padding: '0.75rem', fontSize: '0.9rem', fontWeight: '500' }}>
-                                                    {product.description}
-                                                </td>
-                                                <td style={{ padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                                    {product.brand || '-'}
-                                                </td>
-                                                <td style={{ padding: '0.75rem', fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--success)', textAlign: 'right' }}>
-                                                    ${product.price?.toFixed(2) || '0.00'}
-                                                </td>
-                                                <td style={{ padding: '0.75rem', textAlign: 'center' }}>
-                                                    <span style={{
-                                                        padding: '0.25rem 0.75rem',
-                                                        borderRadius: '999px',
-                                                        fontSize: '0.8rem',
-                                                        fontWeight: '600',
-                                                        background: product.quantity > 10 ? 'rgba(16, 185, 129, 0.15)' :
-                                                            product.quantity > 0 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                                                        color: product.quantity > 10 ? 'var(--success)' :
-                                                            product.quantity > 0 ? 'var(--warning)' : 'var(--danger)'
-                                                    }}>
-                                                        {product.quantity}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+
+                            {/* Empty State / Initial View */}
+                            {searchTerm.length === 0 && (
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', opacity: 0.6 }}>
+                                    <div style={{ background: '#f1f5f9', padding: '2rem', borderRadius: '50%', marginBottom: '1rem' }}>
+                                        <Search size={48} />
+                                    </div>
+                                    <h3 style={{ fontSize: '1.2rem', fontWeight: '500', marginBottom: '0.5rem' }}>Buscador de Productos</h3>
+                                    <p style={{ maxWidth: '300px', textAlign: 'center', fontSize: '0.9rem' }}>Escriba el nombre, código o referencia del producto para buscar y agregar al carrito.</p>
+                                </div>
+                            )}
                         </div>
 
                         {/* Cart */}
-                        <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
-                            <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <ShoppingCart size={20} /> Carrito ({cart.length})
-                            </h3>
-                            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem' }}>
-                                {cart.length === 0 ? (
-                                    <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>Carrito vacío</p>
-                                ) : cart.map((item, index) => (
-                                    <div key={index} style={{ padding: '0.75rem', borderBottom: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                            <strong style={{ fontSize: '0.8rem' }}>{item.description}</strong>
-                                            <button onClick={() => removeFromCart(index)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}>
-                                                <Trash2 size={14} />
-                                            </button>
+                        {/* Cart Panel */}
+                        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'white', border: 'none', boxShadow: 'var(--shadow-lg)' }}>
+                            <div style={{ padding: '1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <ShoppingCart size={20} /> Carrito ({activeCartItems.length})
+                                </h3>
+                                <button onClick={() => updateActiveCart({ items: [] })} style={{ color: 'var(--danger)', background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: '8px' }} title="Vaciar Carrito"><Trash2 size={16} /></button>
+                            </div>
+
+                            <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem' }}>
+                                {activeCartItems.map((item, idx) => (
+                                    <div key={idx} style={{ marginBottom: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #f1f5f9' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'flex-start' }}>
+                                            <span style={{ fontWeight: '600', fontSize: '0.9rem', color: '#334155', lineHeight: '1.4' }}>{item.description}</span>
+                                            <button onClick={() => removeFromCart(idx)} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '0', marginLeft: '0.5rem' }}><Trash2 size={14} /></button>
                                         </div>
-                                        {/* Precio unitario */}
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                                            P/U: <span style={{ color: 'var(--success)' }}>${item.priceUSD.toFixed(2)}</span> | <span style={{ color: 'var(--accent-primary)' }}>Bs {(item.priceUSD * exchangeRate).toFixed(2)}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                            <button onClick={() => updateCartItem(index, 'qty', Math.max(1, item.qty - 1))} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem' }}>
-                                                <Minus size={12} />
-                                            </button>
-                                            <span style={{ minWidth: '30px', textAlign: 'center' }}>{item.qty}</span>
-                                            <button onClick={() => updateCartItem(index, 'qty', Math.min(item.maxQty, item.qty + 1))} className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem' }}>
-                                                <Plus size={12} />
-                                            </button>
-                                            <span style={{ marginLeft: 'auto' }}>×</span>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                value={item.priceUSD}
-                                                onChange={(e) => updateCartItem(index, 'priceUSD', parseFloat(e.target.value) || 0)}
-                                                style={{ width: '70px', textAlign: 'right', padding: '0.25rem' }}
-                                            />
-                                        </div>
-                                        {/* Total por ítem en USD y Bs */}
-                                        <div style={{ textAlign: 'right', marginTop: '0.5rem' }}>
-                                            <div style={{ color: 'var(--success)', fontWeight: 'bold' }}>${(item.priceUSD * item.qty).toFixed(2)}</div>
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Bs {(item.priceUSD * item.qty * exchangeRate).toFixed(2)}</div>
+
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            {/* Price Details */}
+                                            <div style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', flexDirection: 'column' }}>
+                                                <span>P/U: <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>${(item.priceUSD || 0).toFixed(2)}</span> | Bs {((item.priceUSD || 0) * exchangeRate).toFixed(2)}</span>
+                                            </div>
+
+                                            {/* Qty Controls */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <button
+                                                    onClick={() => updateCartItem(idx, 'qty', Math.max(1, item.qty - 1))}
+                                                    style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid #cbd5e1', background: 'white', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                >
+                                                    <Minus size={14} />
+                                                </button>
+                                                <input
+                                                    type="number"
+                                                    value={item.qty}
+                                                    onChange={(e) => updateCartItem(idx, 'qty', parseInt(e.target.value) || 1)}
+                                                    style={{ width: '40px', textAlign: 'center', border: 'none', fontWeight: 'bold', fontSize: '0.9rem', padding: '0', background: 'transparent' }}
+                                                />
+                                                <button
+                                                    onClick={() => updateCartItem(idx, 'qty', item.qty + 1)}
+                                                    style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid #cbd5e1', background: 'white', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                                                >
+                                                    <Plus size={14} />
+                                                </button>
+                                            </div>
+
+                                            {/* Subtotal */}
+                                            <div style={{ textAlign: 'right' }}>
+                                                <div style={{ fontWeight: 'bold', color: 'var(--success)', fontSize: '0.95rem' }}>${((item.priceUSD || 0) * item.qty).toFixed(2)}</div>
+                                                <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Bs {((item.priceUSD || 0) * item.qty * exchangeRate).toFixed(2)}</div>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-
-                            {/* Totals */}
-                            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                    <span>Subtotal:</span>
-                                    <span>${subtotal.toFixed(2)}</span>
-                                </div>
-                                {documentType === 'factura' && (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--warning)' }}>
-                                        <span>IVA (16%):</span>
-                                        <span>${iva.toFixed(2)}</span>
+                                {activeCartItems.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                                        <ShoppingCart size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                                        <div>Carrito vacío</div>
                                     </div>
                                 )}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.1rem' }}>
+                            </div>
+
+                            <div style={{ padding: '1.25rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem', fontSize: '0.9rem', color: '#64748b' }}>
+                                    <span>Subtotal:</span>
+                                    <span>${(subtotal || 0).toFixed(2)}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', fontSize: '1.5rem', fontWeight: '800', color: '#1e293b' }}>
                                     <span>Total:</span>
                                     <div style={{ textAlign: 'right' }}>
-                                        <div style={{ color: 'var(--success)' }}>${total.toFixed(2)}</div>
-                                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Bs {totalBs.toFixed(2)}</div>
+                                        <div style={{ color: 'var(--success)' }}>${(total || 0).toFixed(2)}</div>
+                                        <div style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: '600' }}>Bs {(totalBs || 0).toFixed(2)}</div>
                                     </div>
                                 </div>
+
+                                <button
+                                    onClick={() => updateActiveCart({ step: 2 })}
+                                    disabled={activeCartItems.length === 0}
+                                    className="btn btn-primary"
+                                    style={{ width: '100%', padding: '1rem', fontSize: '1rem', fontWeight: '600', borderRadius: '12px' }}
+                                >
+                                    Siguiente <ChevronRight size={18} />
+                                </button>
                             </div>
                         </div>
                     </>
                 )}
 
-                {/* Step 2: Customer - Streamlined Design */}
+                {/* STEP 2: CUSTOMER */}
                 {step === 2 && (
-                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
-                        <h3 style={{ marginBottom: '0.5rem' }}>Cliente</h3>
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-                            Busca un cliente existente o continúa como Venta Rápida
-                        </p>
+                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', width: '100%', alignSelf: 'start' }}>
+                        <h2 style={{ marginBottom: '1.5rem' }}>Seleccionar Cliente</h2>
 
-                        {/* Smart Search Input */}
-                        <div className="input-group" style={{ marginBottom: '1rem' }}>
-                            <Search className="input-icon" size={18} />
+                        {/* Selected Customer Card */}
+                        <div style={{ padding: '1rem', border: '1px solid var(--primary)', borderRadius: 'var(--radius-md)', background: 'rgba(59, 130, 246, 0.1)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <User size={20} />
+                                </div>
+                                <div>
+                                    <div style={{ fontWeight: 'bold' }}>{customerType === 'quick' ? 'Venta Rápida' : customer?.name || 'Nuevo Cliente'}</div>
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{customerType === 'quick' ? 'Sin registro fiscal' : customer?.rif || 'N/A'}</div>
+                                </div>
+                            </div>
+                            {customerType !== 'quick' && <button onClick={() => updateActiveCart({ customerType: 'quick', customer: null })} style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={16} /></button>}
+                        </div>
+
+                        {/* Search Customers */}
+                        <div style={{ marginBottom: '1rem' }}>
                             <input
                                 type="text"
-                                value={customerSearch}
+                                placeholder="Buscar cliente..."
+                                style={{ width: '100%', padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                                 onChange={(e) => {
-                                    setCustomerSearch(e.target.value);
-                                    if (!e.target.value) {
-                                        setSelectedCustomer(null);
-                                        setCustomerType('quick');
-                                    }
+                                    // Simple filter logic could go here or existing search
                                 }}
-                                placeholder="Buscar por nombre o cédula/RIF..."
-                                style={{ width: '100%' }}
-                                autoFocus
                             />
-                            {customerSearch && (
-                                <button
-                                    onClick={() => { setCustomerSearch(''); setSelectedCustomer(null); setCustomerType('quick'); }}
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.5rem', color: 'var(--text-secondary)' }}
-                                >
-                                    <X size={16} />
-                                </button>
-                            )}
                         </div>
 
-                        {/* Search Results */}
-                        {customerSearch && (
-                            <div style={{
-                                maxHeight: '200px',
-                                overflowY: 'auto',
-                                marginBottom: '1rem',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: 'var(--radius-md)'
-                            }}>
-                                {customers.filter(c =>
-                                    c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                                    c.rif?.toLowerCase().includes(customerSearch.toLowerCase())
-                                ).length > 0 ? (
-                                    customers.filter(c =>
-                                        c.name?.toLowerCase().includes(customerSearch.toLowerCase()) ||
-                                        c.rif?.toLowerCase().includes(customerSearch.toLowerCase())
-                                    ).map(customer => (
-                                        <div
-                                            key={customer.id}
-                                            onClick={() => {
-                                                setSelectedCustomer(customer);
-                                                setCustomerType('existing');
-                                            }}
-                                            style={{
-                                                padding: '0.75rem 1rem',
-                                                background: selectedCustomer?.id === customer.id ? 'rgba(220,38,38,0.1)' : 'transparent',
-                                                borderBottom: '1px solid var(--border-color)',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.75rem',
-                                                transition: 'background 0.2s'
-                                            }}
-                                            className="hover:bg-slate-800"
-                                        >
-                                            <div style={{
-                                                width: '36px', height: '36px', borderRadius: '50%',
-                                                background: selectedCustomer?.id === customer.id ? 'var(--accent-primary)' : 'var(--bg-secondary)',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                color: selectedCustomer?.id === customer.id ? 'white' : 'var(--text-secondary)',
-                                                fontWeight: 'bold', fontSize: '0.9rem'
-                                            }}>
-                                                {customer.name?.charAt(0).toUpperCase()}
-                                            </div>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: '500' }}>{customer.name}</div>
-                                                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                                    {customer.type}-{customer.rif || 'S/I'} {customer.phone && `• ${customer.phone}`}
-                                                </div>
-                                            </div>
-                                            {selectedCustomer?.id === customer.id && (
-                                                <CheckCircle size={20} style={{ color: 'var(--accent-primary)' }} />
-                                            )}
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div style={{ padding: '1.5rem', textAlign: 'center' }}>
-                                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                                            No se encontraron clientes con "{customerSearch}"
-                                        </p>
-                                        <button
-                                            onClick={() => {
-                                                setNewCustomer({ ...newCustomer, name: customerSearch });
-                                                setCustomerType('new');
-                                            }}
-                                            className="btn btn-secondary"
-                                            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                                        >
-                                            <UserPlus size={16} /> Crear "{customerSearch.substring(0, 20)}..."
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Selected Customer Badge or Quick Sale Badge */}
-                        <div style={{
-                            padding: '1rem',
-                            background: selectedCustomer ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                            border: `1px solid ${selectedCustomer ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
-                            borderRadius: 'var(--radius-md)',
-                            marginBottom: '1.5rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '1rem'
-                        }}>
-                            <div style={{
-                                width: '40px', height: '40px', borderRadius: '50%',
-                                background: selectedCustomer ? '#10B981' : '#3B82F6',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: 'white'
-                            }}>
-                                {selectedCustomer ? <User size={20} /> : <ShoppingCart size={20} />}
-                            </div>
-                            <div>
-                                <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-                                    {selectedCustomer ? selectedCustomer.name : 'Venta Rápida'}
+                        <div style={{ display: 'grid', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
+                            {customers.slice(0, 5).map(c => (
+                                <div key={c.id} onClick={() => updateActiveCart({ customer: c, customerType: 'existing' })} style={{ padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between' }}>
+                                    <span>{c.name}</span>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{c.rif}</span>
                                 </div>
-                                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                    {selectedCustomer
-                                        ? `${selectedCustomer.type}-${selectedCustomer.rif || 'S/I'}`
-                                        : 'Cliente casual sin datos fiscales'}
-                                </div>
-                            </div>
-                            {selectedCustomer && (
-                                <button
-                                    onClick={() => { setSelectedCustomer(null); setCustomerType('quick'); setCustomerSearch(''); }}
-                                    className="btn btn-ghost"
-                                    style={{ marginLeft: 'auto', padding: '0.5rem' }}
-                                    title="Cambiar a Venta Rápida"
-                                >
-                                    <X size={16} />
-                                </button>
-                            )}
+                            ))}
                         </div>
 
-                        {/* Inline New Customer Form (appears when customerType is 'new') */}
-                        {customerType === 'new' && (
-                            <div style={{
-                                padding: '1.5rem',
-                                background: 'var(--bg-card)',
-                                borderRadius: 'var(--radius-md)',
-                                border: '1px solid var(--border-color)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <UserPlus size={18} /> Crear Nuevo Cliente
-                                </h4>
-                                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '0.5rem' }}>
-                                        <select
-                                            value={newCustomer.type}
-                                            onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })}
-                                            style={{ padding: '0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', background: 'var(--bg-primary)' }}
-                                        >
-                                            <option value="V">V</option>
-                                            <option value="E">E</option>
-                                            <option value="J">J</option>
-                                            <option value="G">G</option>
-                                        </select>
-                                        <input
-                                            type="text"
-                                            value={newCustomer.rif}
-                                            onChange={(e) => setNewCustomer({ ...newCustomer, rif: e.target.value })}
-                                            placeholder="Cédula / RIF"
-                                        />
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={newCustomer.name}
-                                        onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-                                        placeholder="Nombre o Razón Social *"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={newCustomer.phone}
-                                        onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                                        placeholder="Teléfono"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={newCustomer.address}
-                                        onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
-                                        placeholder="Dirección fiscal"
-                                    />
-                                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                                        <button
-                                            onClick={() => {
-                                                setCustomerType('quick');
-                                                setNewCustomer({ type: 'V', name: '', rif: '', phone: '', address: '' });
-                                            }}
-                                            className="btn btn-secondary"
-                                            style={{ flex: 1 }}
-                                        >
-                                            Cancelar
-                                        </button>
-                                        <button
-                                            onClick={createCustomer}
-                                            className="btn btn-primary"
-                                            style={{ flex: 1 }}
-                                            disabled={!newCustomer.name}
-                                        >
-                                            <UserPlus size={16} /> Crear y Seleccionar
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                        <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
+                            <button onClick={() => updateActiveCart({ step: 1 })} className="btn btn-secondary" style={{ flex: 1 }}>Atrás</button>
+                            <button onClick={() => updateActiveCart({ step: 3 })} className="btn btn-primary" style={{ flex: 1 }}>Continuar</button>
+                        </div>
                     </div>
                 )}
 
-                {/* Step 3: Sale Type */}
+                {/* STEP 3: TYPE */}
                 {step === 3 && (
-                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
-                        <h3 style={{ marginBottom: '1.5rem' }}>Tipo de Venta</h3>
+                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', width: '100%', alignSelf: 'start' }}>
+                        <h2 style={{ marginBottom: '1.5rem' }}>Detalles de Venta</h2>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
                             <button
-                                onClick={() => setSaleType('contado')}
+                                onClick={() => updateActiveCart({ saleType: 'contado' })}
                                 className={`btn ${saleType === 'contado' ? 'btn-primary' : 'btn-secondary'}`}
-                                style={{ padding: '2rem', flexDirection: 'column', gap: '0.5rem' }}
+                                style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', height: 'auto' }}
                             >
-                                <DollarSign size={32} />
-                                <span style={{ fontSize: '1.1rem' }}>CONTADO</span>
+                                <DollarSign size={32} /> Contado
                             </button>
                             <button
-                                onClick={() => setSaleType('credito')}
+                                onClick={() => updateActiveCart({ saleType: 'credito' })}
                                 className={`btn ${saleType === 'credito' ? 'btn-primary' : 'btn-secondary'}`}
-                                style={{ padding: '2rem', flexDirection: 'column', gap: '0.5rem' }}
+                                style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', height: 'auto' }}
                             >
-                                <Calendar size={32} />
-                                <span style={{ fontSize: '1.1rem' }}>CRÉDITO</span>
+                                <Receipt size={32} /> Crédito
                             </button>
                         </div>
 
-                        {/* Credit Days Selector - Only when Credit is selected */}
                         {saleType === 'credito' && (
-                            <div style={{
-                                padding: '1.5rem',
-                                background: 'rgba(245, 158, 11, 0.1)',
-                                border: '1px solid rgba(245, 158, 11, 0.3)',
-                                borderRadius: 'var(--radius-md)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-                                    <Calendar size={18} style={{ color: '#f59e0b' }} />
-                                    <strong style={{ color: '#f59e0b' }}>Días de Crédito</strong>
-                                </div>
-
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
-                                    {[15, 30, 45, 60, 90].map(days => (
-                                        <button
-                                            key={days}
-                                            onClick={() => { setCreditDays(days); setCustomCreditDays(''); }}
-                                            className={`btn ${creditDays === days && !customCreditDays ? 'btn-primary' : 'btn-secondary'}`}
-                                            style={{ padding: '0.5rem 1rem', minWidth: '60px' }}
-                                        >
-                                            {days}
-                                        </button>
+                            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(234, 179, 8, 0.1)', borderRadius: 'var(--radius-md)' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#eab308', fontWeight: 'bold' }}>Días de Crédito</label>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    {[7, 15, 30].map(d => (
+                                        <button key={d} onClick={() => updateActiveCart({ creditDays: d })} className={`btn ${creditDays === d ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1 }}>{d} días</button>
                                     ))}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Otro:</span>
-                                        <input
-                                            type="number"
-                                            value={customCreditDays}
-                                            onChange={(e) => {
-                                                setCustomCreditDays(e.target.value);
-                                                if (e.target.value) setCreditDays(parseInt(e.target.value) || 30);
-                                            }}
-                                            placeholder="Días"
-                                            style={{ width: '70px', padding: '0.5rem', textAlign: 'center' }}
-                                            min="1"
-                                            max="365"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div style={{
-                                    fontSize: '0.9rem',
-                                    padding: '0.75rem',
-                                    background: 'rgba(0,0,0,0.1)',
-                                    borderRadius: 'var(--radius-sm)'
-                                }}>
-                                    <strong>Fecha de Vencimiento: </strong>
-                                    <span style={{ color: '#f59e0b' }}>
-                                        {new Date(Date.now() + (creditDays * 24 * 60 * 60 * 1000)).toLocaleDateString('es-VE')}
-                                    </span>
                                 </div>
                             </div>
                         )}
 
-                        {/* Preview */}
-                        <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
-                            <h4 style={{ marginBottom: '1rem' }}>Resumen</h4>
-                            <div style={{ fontSize: '0.9rem' }}>
-                                <div style={{ marginBottom: '0.5rem' }}>
-                                    <strong>Cliente:</strong> {customerType === 'quick' ? 'Venta Rápida' : selectedCustomer?.name || 'No seleccionado'}
-                                </div>
-                                <div style={{ marginBottom: '0.5rem' }}>
-                                    <strong>Ítems:</strong> {cart.length} ({cart.reduce((s, i) => s + i.qty, 0)} unidades)
-                                </div>
-                                <div style={{ marginBottom: '0.5rem' }}>
-                                    <strong>Tipo:</strong> {saleType === 'contado' ? 'Contado' : `Crédito (${creditDays} días)`}
-                                </div>
-                                <div>
-                                    <strong>Total:</strong> ${total.toFixed(2)} / Bs {totalBs.toFixed(2)}
-                                </div>
+                        <div style={{ marginBottom: '1.5rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem' }}>Documento</label>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button onClick={() => updateActiveCart({ documentType: 'pedido' })} className={`btn ${documentType === 'pedido' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1 }}>Pedido</button>
+                                <button onClick={() => updateActiveCart({ documentType: 'factura' })} className={`btn ${documentType === 'factura' ? 'btn-primary' : 'btn-secondary'}`} style={{ flex: 1 }}>Factura</button>
                             </div>
+                        </div>
+
+                        <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem' }}>
+                            <button onClick={() => updateActiveCart({ step: 2 })} className="btn btn-secondary" style={{ flex: 1 }}>Atrás</button>
+                            <button
+                                onClick={() => {
+                                    if (saleType === 'contado' && !posMode === 'quote') {
+                                        updateActiveCart({ step: 4 });
+                                    } else {
+                                        finalizeSale();
+                                    }
+                                }}
+                                className="btn btn-primary"
+                                style={{ flex: 1 }}
+                            >
+                                {saleType === 'contado' ? 'Ir a Pagar' : 'Finalizar'}
+                            </button>
                         </div>
                     </div>
                 )}
 
-                {/* Step 4: Finish */}
+                {/* STEP 4: PAYMENT (New!) */}
                 {step === 4 && (
-                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '500px', margin: '0 auto' }}>
-                        <h3 style={{ marginBottom: '1.5rem' }}>Generar Documento</h3>
+                    <div className="glass-panel" style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto', width: '100%', alignSelf: 'start', display: 'grid', gridTemplateColumns: '1fr 300px', gap: '2rem' }}>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
-                            <button
-                                onClick={() => setDocumentType('pedido')}
-                                className={`btn ${documentType === 'pedido' ? 'btn-primary' : 'btn-secondary'}`}
-                                style={{ padding: '2rem', flexDirection: 'column', gap: '0.5rem' }}
-                            >
-                                <Receipt size={32} />
-                                <span style={{ fontSize: '1.1rem' }}>📋 PEDIDO</span>
-                                <span style={{ fontSize: '0.75rem', color: documentType === 'pedido' ? 'white' : 'var(--text-secondary)' }}>Sin IVA</span>
-                            </button>
-                            <button
-                                onClick={() => setDocumentType('factura')}
-                                className={`btn ${documentType === 'factura' ? 'btn-primary' : 'btn-secondary'}`}
-                                style={{ padding: '2rem', flexDirection: 'column', gap: '0.5rem' }}
-                            >
-                                <FileCheck size={32} />
-                                <span style={{ fontSize: '1.1rem' }}>🧾 FACTURA</span>
-                                <span style={{ fontSize: '0.75rem', color: documentType === 'factura' ? 'white' : 'var(--text-secondary)' }}>Con IVA 16%</span>
-                            </button>
+                        {/* Left: Methods */}
+                        <div>
+                            <h2 style={{ marginBottom: '1.5rem' }}>Métodos de Pago</h2>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                                {Object.entries(PAYMENT_METHODS).map(([key, info]) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => addPaymentMethod(key)}
+                                        className="btn btn-secondary"
+                                        style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                                    >
+                                        <info.icon size={18} /> {info.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                {paymentMethods.map((p, idx) => (
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-secondary)', padding: '0.5rem', borderRadius: 'var(--radius-md)' }}>
+                                        <div style={{ width: '150px' }}>{PAYMENT_METHODS[p.method].label}</div>
+                                        <input
+                                            type="number"
+                                            value={p.amount}
+                                            onChange={(e) => updatePayment(idx, 'amount', parseFloat(e.target.value))}
+                                            placeholder="Monto"
+                                            className="form-input"
+                                            style={{ flex: 1 }}
+                                        />
+                                        {PAYMENT_METHODS[p.method].requiresRef && (
+                                            <input
+                                                type="text"
+                                                value={p.reference}
+                                                onChange={(e) => updatePayment(idx, 'reference', e.target.value)}
+                                                placeholder="Ref"
+                                                className="form-input"
+                                                style={{ flex: 1 }}
+                                            />
+                                        )}
+                                        <button onClick={() => removePayment(idx)} className="btn-icon-sm" style={{ color: 'var(--danger)' }}><Trash2 size={16} /></button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
 
-                        {/* Final Summary */}
-                        <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.5rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                <span>Subtotal:</span>
-                                <span>${subtotal.toFixed(2)}</span>
+                        {/* Right: Summary */}
+                        <div style={{ background: 'var(--bg-secondary)', padding: '1.5rem', borderRadius: 'var(--radius-lg)', height: 'fit-content' }}>
+                            <h3 style={{ marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Resumen de Pago</h3>
+                            <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Total a Pagar</span>
+                                <span style={{ fontWeight: 'bold' }}>${(total || 0).toFixed(2)}</span>
                             </div>
-                            {documentType === 'factura' && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--warning)' }}>
-                                    <span>IVA (16%):</span>
-                                    <span>${iva.toFixed(2)}</span>
-                                </div>
-                            )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.2rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
-                                <span>TOTAL:</span>
-                                <div style={{ textAlign: 'right' }}>
-                                    <div style={{ color: 'var(--success)' }}>${total.toFixed(2)}</div>
-                                    <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Bs {totalBs.toFixed(2)}</div>
-                                </div>
+                            <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', color: 'var(--success)' }}>
+                                <span>Pagado</span>
+                                <span>${(totalPaid || 0).toFixed(2)}</span>
                             </div>
-                        </div>
+                            <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px dashed var(--border-color)', display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 'bold', color: remainingToPay > 0.01 ? 'var(--danger)' : 'var(--success)' }}>
+                                <span>{remainingToPay > 0.01 ? 'Restante' : 'Cambio/Completado'}</span>
+                                <span>${Math.abs(remainingToPay || 0).toFixed(2)}</span>
+                            </div>
 
-                        <button onClick={finalizeSale} className="btn btn-primary" style={{ width: '100%', padding: '1rem', fontSize: '1.1rem' }}>
-                            <CheckCircle size={20} /> Confirmar {documentType === 'pedido' ? 'Pedido' : 'Factura'}
-                        </button>
+                            <button
+                                onClick={finalizeSale}
+                                disabled={!isFullyPaid}
+                                className="btn btn-primary"
+                                style={{ width: '100%', marginTop: '2rem', padding: '1rem', fontSize: '1.1rem' }}
+                            >
+                                <CheckCircle size={20} /> Confirmar Pago
+                            </button>
+                            <button onClick={() => updateActiveCart({ step: 3 })} className="btn btn-secondary" style={{ width: '100%', marginTop: '0.5rem' }}>
+                                Atrás
+                            </button>
+                        </div>
                     </div>
                 )}
 
-                {/* Step 5: Document View */}
+                {/* STEP 5: SUCCESS */}
                 {step === 5 && completedSale && (
-                    <InvoiceDocument
-                        sale={completedSale}
-                        documentNumber={documentNumber}
-                        onNewSale={startNewSale}
-                        onPrint={() => window.print()}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                        <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', maxWidth: '500px' }}>
+                            <div style={{ width: '80px', height: '80px', background: 'var(--success)', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem auto' }}>
+                                <CheckCircle size={40} />
+                            </div>
+                            <h2 style={{ marginBottom: '0.5rem' }}>¡Venta Completada!</h2>
+                            <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Documento #{completedSale.documentNumber} generado exitosamente.</p>
+
+                            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                                <button onClick={() => window.print()} className="btn btn-secondary">
+                                    <Printer size={18} /> Imprimir Ticket
+                                </button>
+                                <button onClick={startNewSale} className="btn btn-primary">
+                                    <Plus size={18} /> Nueva Venta
+                                </button>
+                            </div>
+                        </div>
+                        {/* Hidden Invoice for Printing */}
+                        <div style={{ display: 'none' }}>
+                            <InvoiceDocument sale={completedSale} documentNumber={completedSale.documentNumber} />
+                        </div>
+                    </div>
                 )}
             </div>
 
-            {/* Navigation - Hidden on step 5 */}
-            {step < 5 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-                    <button
-                        onClick={() => setStep(step - 1)}
-                        disabled={step === 1}
-                        className="btn btn-secondary"
-                        style={{ visibility: step === 1 ? 'hidden' : 'visible' }}
-                    >
-                        <ChevronLeft size={18} /> Anterior
-                    </button>
-                    <button
-                        onClick={() => setStep(step + 1)}
-                        disabled={step === 4 || cart.length === 0}
-                        className="btn btn-primary"
-                        style={{ visibility: step === 4 ? 'hidden' : 'visible' }}
-                    >
-                        Siguiente <ChevronRight size={18} />
-                    </button>
-                </div>
-            )}
-            {/* Daily Sales Modal */}
-            <DailySalesModal
-                isOpen={showSalesModal}
-                onClose={() => setShowSalesModal(false)}
-                sales={sales}
-                products={products}
-            />
+            <DailySalesModal isOpen={showSalesModal} onClose={() => setShowSalesModal(false)} sales={sales} products={products} />
         </div>
     );
 };
 
 export default POS;
-

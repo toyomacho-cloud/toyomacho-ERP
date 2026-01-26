@@ -80,7 +80,6 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
         },
         { id: 'purchases', label: 'Compras', icon: ShoppingCart },
         { id: 'pos', label: 'POS', icon: ArrowRightLeft },
-        { id: 'cashregister', label: 'Caja', icon: Wallet, badge: pendingPaymentsCount },
         { id: 'receivables', label: 'Cuentas x Cobrar', icon: DollarSign },
         { id: 'clients', label: 'Contactos', icon: Users },
         { id: 'mail', label: 'NovaMail', icon: Mail, badge: unreadCount },
@@ -232,7 +231,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
                             fontWeight: 'bold',
                             fontSize: '0.9rem'
                         }}>
-                            {userProfile.displayName ? userProfile.displayName.charAt(0).toUpperCase() : 'U'}
+                            {(userProfile.display_name || userProfile.displayName || 'U').charAt(0).toUpperCase()}
                         </div>
                         <div style={{ overflow: 'hidden' }}>
                             <div style={{
@@ -242,14 +241,14 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis'
                             }}>
-                                {userProfile.displayName || 'Usuario'}
+                                {userProfile.display_name || userProfile.displayName || 'Usuario'}
                             </div>
                             <div style={{
                                 fontSize: '0.7rem',
                                 color: 'var(--text-secondary)',
                                 textTransform: 'capitalize'
                             }}>
-                                {userProfile.role || 'Rol desconocido'}
+                                {userProfile.email || 'Email no disponible'}
                             </div>
                         </div>
                     </div>

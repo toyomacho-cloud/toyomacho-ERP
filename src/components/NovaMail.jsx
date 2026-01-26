@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Send, Inbox, PlusCircle, Paperclip, Download, ArrowLeft, Clock, Trash2 } from 'lucide-react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
+import { supabase } from '../supabase';
 import { useInternalMail } from '../hooks/useInternalMail';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
@@ -30,13 +29,13 @@ const NovaMail = () => {
             if (!currentCompany?.id) return;
 
             try {
-                const usersRef = collection(db, 'users');
-                const q = query(usersRef, where('companyId', '==', currentCompany.id));
-                const snapshot = await getDocs(q);
-                const usersList = snapshot.docs.map(doc => ({
-                    uid: doc.id,
-                    ...doc.data()
-                }));
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('*');
+
+                if (error) throw error;
+
+                const usersList = data || [];
                 setCompanyUsers(usersList);
             } catch (error) {
                 console.error('Error fetching company users:', error);

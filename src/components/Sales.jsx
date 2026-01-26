@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { PackageCheck, Plus, Trash2, DollarSign, CreditCard, FileText, Download, X } from 'lucide-react';
 import { useInventoryContext } from '../context/InventoryContext';
-import { auth } from '../firebase';
+import { useAuth } from '../context/AuthContext';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { generateQuotePDF, downloadQuotePDF, generateSalesReportPDF, downloadSalesReportPDF } from '../utils/quote-generator';
 
 const Sales = () => {
     const { products, sales, addSale } = useInventoryContext();
+    const { currentUser } = useAuth();
 
     // Force rebuild: Multi-Cart Implementation Active
 
@@ -213,7 +214,7 @@ const Sales = () => {
             return;
         }
 
-        const userName = auth.currentUser?.displayName || auth.currentUser?.email || 'Usuario';
+        const userName = currentUser?.user_metadata?.display_name || currentUser?.email || 'Usuario';
 
         const saleItems = activeCart.items.map(item => {
             let finalAmountUSD = item.amountUSD;

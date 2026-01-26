@@ -1,13 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, Filter, RefreshCw, FileSpreadsheet, ChevronUp, ChevronDown, X, Download } from 'lucide-react';
 import { useInventoryContext } from '../context/InventoryContext';
 import { useAuth } from '../context/AuthContext';
 import ProductForm from './ProductForm';
 import ExcelImport from './ExcelImport';
 import { exportProductsToExcel, exportProductsToCSV } from '../utils/excel-export';
+import { debounce } from '../utils/debounce';
 
 const Inventory = () => {
-    const { products, deleteProduct, clearAllProducts, migrateSKUFormat, categories, brands, addCategories, addProducts, addBrand, addBrands } = useInventoryContext();
+    const {
+        products,
+        deleteProduct,
+        clearAllProducts,
+        migrateSKUFormat,
+        categories,
+        brands,
+        addCategory,
+        addProductsBatch,
+        addBrand,
+        addBrands,
+        addProduct,
+        updateProduct
+    } = useInventoryContext();
+
+
     const { isAdmin, hasPermission } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
     const [locationFilter, setLocationFilter] = useState('');
@@ -24,25 +40,36 @@ const Inventory = () => {
         return [...new Set(locations)].sort();
     }, [products]);
 
-    // Filter and Sort Products
+    const handleSearchChange = (e) => {
+        setSearchTerm(e.target.value);
+    };
+
+    // Filter and Sort Products (Client-side with case-insensitive search)
     const sortedProducts = useMemo(() => {
         let filtered = [...products];
 
-        if (searchTerm) {
-            const lowerTerm = searchTerm.toLowerCase();
-            filtered = filtered.filter(p =>
-                (p.sku && p.sku.toLowerCase().includes(lowerTerm)) ||
-                (p.reference && p.reference.toLowerCase().includes(lowerTerm)) ||
-                (p.description && p.description.toLowerCase().includes(lowerTerm))
-            );
+        // Case-insensitive multi-field search
+        if (searchTerm && searchTerm.trim()) {
+            const term = searchTerm.trim().toLowerCase();
+            filtered = filtered.filter(p => {
+                const description = (p.description || '').toLowerCase();
+                const sku = (p.sku || '').toLowerCase();
+                const reference = (p.reference || '').toLowerCase();
+
+                return description.includes(term) ||
+                    sku.includes(term) ||
+                    reference.includes(term);
+            });
         }
 
+        // Location filter
         if (locationFilter) {
             filtered = filtered.filter(p =>
                 p.location === locationFilter
             );
         }
 
+        // Sorting
         if (sortConfig.key) {
             filtered.sort((a, b) => {
                 const aValue = a[sortConfig.key] || '';
@@ -141,9 +168,14 @@ const Inventory = () => {
                             type="text"
                             placeholder="Buscar por SKU, Referencia o Descripción..."
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onChange={handleSearchChange}
                             style={{ paddingLeft: '3rem', width: '100%' }}
                         />
+                        {sortedProducts.length > 0 && (
+                            <div style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                {sortedProducts.length} de {products.length} productos
+                            </div>
+                        )}
                     </div>
 
                     {/* Filters Row */}
@@ -256,8 +288,18 @@ const Inventory = () => {
 
             <ProductForm
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => {
+                    setIsModalOpen(false);
+                    setEditingProduct(null);
+                }}
                 editProduct={editingProduct}
+                products={products}
+                brands={brands}
+                categories={categories}
+                addProduct={addProduct}
+                updateProduct={updateProduct}
+                addBrand={addBrand}
+                addCategory={addCategory}
             />
 
             {

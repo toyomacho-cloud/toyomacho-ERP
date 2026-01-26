@@ -26,4 +26,15 @@ export const db = getFirestore(app);
 // Initialize Firebase Storage
 export const storage = getStorage(app);
 
+// Re-export Auth functions for centralized access
+export {
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged,
+    sendPasswordResetEmail,
+    updateEmail,
+    updatePassword
+} from 'firebase/auth';
+
 export default app;

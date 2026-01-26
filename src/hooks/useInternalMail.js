@@ -1,164 +1,42 @@
 import { useState, useEffect } from 'react';
-import {
-    collection,
-    addDoc,
-    query,
-    where,
-    orderBy,
-    onSnapshot,
-    doc,
-    updateDoc,
-    serverTimestamp
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
 import { useCompany } from '../context/CompanyContext';
 import { useAuth } from '../context/AuthContext';
 
-const COLLECTION_NAME = 'internalMail';
+// NOTE: NovaMail functionality is temporarily disabled during Supabase migration
+// This stub provides empty data to prevent app crashes
+
+const COLLECTION_NAME = 'internal_mail';
 
 export const useInternalMail = () => {
     const { currentCompany } = useCompany();
     const { userProfile } = useAuth();
     const [inbox, setInbox] = useState([]);
     const [sent, setSent] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
 
     const companyId = currentCompany?.id;
-    const userId = userProfile?.uid;
+    const userId = userProfile?.id;
 
-    // Subscribe to inbox messages
+    // Temporarily disabled - returns empty data
     useEffect(() => {
-        if (!companyId || !userId) {
-            setLoading(false);
-            return;
-        }
-
-        const inboxQuery = query(
-            collection(db, COLLECTION_NAME),
-            where('companyId', '==', companyId),
-            where('to.uid', '==', userId),
-            orderBy('timestamp', 'desc')
-        );
-
-        const unsubscribeInbox = onSnapshot(inboxQuery, (snapshot) => {
-            const messages = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }))
-                .filter(msg => !msg.deletedForReceiver); // Filter out deleted messages
-
-            setInbox(messages);
-            setUnreadCount(messages.filter(m => !m.read).length);
-            setLoading(false);
-        });
-
-        return () => unsubscribeInbox();
+        setLoading(false);
     }, [companyId, userId]);
 
-    // Subscribe to sent messages
-    useEffect(() => {
-        if (!companyId || !userId) return;
-
-        const sentQuery = query(
-            collection(db, COLLECTION_NAME),
-            where('companyId', '==', companyId),
-            where('from.uid', '==', userId),
-            orderBy('timestamp', 'desc')
-        );
-
-        const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => {
-            const messages = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }))
-                .filter(msg => !msg.deletedForSender); // Filter out deleted messages
-
-            setSent(messages);
-        });
-
-        return () => unsubscribeSent();
-    }, [companyId, userId]);
-
-    // Send a new message
+    // Send a new message - temporarily disabled
     const sendMessage = async ({ to, subject, body, attachments = [] }) => {
-        if (!companyId || !userId || !userProfile) {
-            throw new Error('Usuario no autenticado');
-        }
-
-        try {
-            // Upload attachments first
-            const uploadedAttachments = [];
-            for (const file of attachments) {
-                const storageRef = ref(storage, `companies/${companyId}/mail-attachments/${Date.now()}_${file.name}`);
-                await uploadBytes(storageRef, file);
-                const url = await getDownloadURL(storageRef);
-                uploadedAttachments.push({
-                    name: file.name,
-                    url,
-                    size: formatFileSize(file.size),
-                    type: file.type
-                });
-            }
-
-            // Create mail document
-            const mailData = {
-                companyId,
-                from: {
-                    uid: userId,
-                    name: userProfile.displayName || userProfile.email,
-                    email: userProfile.email
-                },
-                to: {
-                    uid: to.uid,
-                    name: to.displayName || to.email,
-                    email: to.email
-                },
-                subject,
-                body,
-                attachments: uploadedAttachments,
-                timestamp: serverTimestamp(),
-                read: false,
-                deletedForSender: false,
-                deletedForReceiver: false
-            };
-
-            await addDoc(collection(db, COLLECTION_NAME), mailData);
-            return { success: true };
-        } catch (error) {
-            console.error('Error sending message:', error);
-            throw error;
-        }
+        console.warn('NovaMail: sendMessage is temporarily disabled during Supabase migration');
+        throw new Error('El correo interno está temporalmente deshabilitado durante la migración a Supabase.');
     };
 
-    // Mark message as read
+    // Mark message as read - temporarily disabled
     const markAsRead = async (messageId) => {
-        try {
-            const messageRef = doc(db, COLLECTION_NAME, messageId);
-            await updateDoc(messageRef, { read: true });
-        } catch (error) {
-            console.error('Error marking as read:', error);
-        }
+        console.warn('NovaMail: markAsRead is temporarily disabled');
     };
 
-    // Delete message (soft delete)
+    // Delete message - temporarily disabled
     const deleteMessage = async (messageId, type) => {
-        try {
-            const messageRef = doc(db, COLLECTION_NAME, messageId);
-            const updateData = {};
-
-            if (type === 'sent') {
-                updateData.deletedForSender = true;
-            } else {
-                updateData.deletedForReceiver = true;
-            }
-
-            await updateDoc(messageRef, updateData);
-        } catch (error) {
-            console.error('Error deleting message:', error);
-            throw error;
-        }
+        console.warn('NovaMail: deleteMessage is temporarily disabled');
     };
 
     return {

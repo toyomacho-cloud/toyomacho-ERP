@@ -14,6 +14,7 @@ import {
     RefreshCw
 } from 'lucide-react';
 import { useInventoryContext } from '../context/InventoryContext';
+import { useExchangeRates } from '../context/ExchangeRateContext';
 import {
     BarChart,
     Bar,
@@ -30,54 +31,9 @@ import {
 
 // Exchange Rate Cards Component
 const ExchangeRateCards = () => {
-    const [bcvRate, setBcvRate] = useState(0);
-    const [usdtRate, setUsdtRate] = useState(0);
-    const [loading, setLoading] = useState(false);
-    const [lastUpdate, setLastUpdate] = useState(null);
+    const { bcvRate, usdtRate, lastUpdate, loading, refreshRates } = useExchangeRates();
 
-    const fetchRates = async () => {
-        setLoading(true);
-        try {
-            const response = await fetch('https://ve.dolarapi.com/v1/dolares');
-            const data = await response.json();
-
-            const bcv = data.find(item => item.fuente === 'oficial');
-            const paralelo = data.find(item => item.fuente === 'paralelo');
-
-            if (bcv?.promedio) {
-                const rate = Math.round(bcv.promedio * 100) / 100;
-                setBcvRate(rate);
-                localStorage.setItem('dashboardBcvRate', rate.toString());
-            }
-
-            if (paralelo?.promedio) {
-                const rate = Math.round(paralelo.promedio * 100) / 100;
-                setUsdtRate(rate);
-                localStorage.setItem('dashboardUsdtRate', rate.toString());
-            }
-
-            setLastUpdate(new Date());
-        } catch (error) {
-            console.error('Error fetching rates:', error);
-            const savedBcv = localStorage.getItem('dashboardBcvRate');
-            const savedUsdt = localStorage.getItem('dashboardUsdtRate');
-            if (savedBcv) setBcvRate(parseFloat(savedBcv));
-            if (savedUsdt) setUsdtRate(parseFloat(savedUsdt));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        const savedBcv = localStorage.getItem('dashboardBcvRate');
-        const savedUsdt = localStorage.getItem('dashboardUsdtRate');
-        if (savedBcv) setBcvRate(parseFloat(savedBcv));
-        if (savedUsdt) setUsdtRate(parseFloat(savedUsdt));
-
-        fetchRates();
-        const interval = setInterval(fetchRates, 5 * 60 * 1000);
-        return () => clearInterval(interval);
-    }, []);
+    // Removed local redundant internal fetching logic - now uses global context
 
     const getTimeSinceUpdate = () => {
         if (!lastUpdate) return '';
@@ -90,7 +46,7 @@ const ExchangeRateCards = () => {
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             {/* Refresh Button */}
             <button
-                onClick={fetchRates}
+                onClick={refreshRates}
                 disabled={loading}
                 className="btn btn-ghost"
                 style={{
@@ -207,7 +163,7 @@ const Dashboard = () => {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        const recentSales = sales.filter(s => new Date(s.createdAt) >= thirtyDaysAgo);
+        const recentSales = sales.filter(s => new Date(s.created_at || s.createdAt) >= thirtyDaysAgo);
         const unitsSold = recentSales.reduce((acc, s) => acc + (parseInt(s.quantity) || 0), 0);
         const currentTotalUnits = products.reduce((acc, p) => acc + (parseInt(p.quantity) || 0), 0);
 

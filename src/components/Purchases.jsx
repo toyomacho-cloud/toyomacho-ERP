@@ -8,7 +8,7 @@ import ProductForm from './ProductForm';
 import LabelGenerator from './LabelGenerator';
 
 const Purchases = () => {
-    const { products, purchases, providers, addPurchase, addProvider, updateProvider, deletePurchasesByDate } = useInventoryContext();
+    const { products, purchases, providers, brands, categories, addPurchase, addProvider, updateProvider, deletePurchasesByDate, addProduct, updateProduct, addBrand, addCategory } = useInventoryContext();
     const { userProfile } = useAuth();
 
     // Header State
@@ -135,16 +135,7 @@ const Purchases = () => {
             const generateLabels = window.confirm('✅ Compra registrada exitosamente.\n\n¿Desea generar etiquetas para estos productos?');
 
             if (generateLabels) {
-                setLabelProducts(cart.map(item => ({
-                    reference: item.productReference || item.productSku,
-                    description: item.productName,
-                    location: products.find(p => p.id === parseInt(item.productId))?.location || '-',
-                    cost: item.price,
-                    profitMargin: 300,
-                    price: item.price * 3,
-                    copies: 1
-                })));
-                setIsLabelModalOpen(true);
+                setShowLabelGenerator(true);
             }
 
             // Reset cart only - keep provider and invoice for corrections/continued purchases
@@ -190,29 +181,8 @@ const Purchases = () => {
 
     // Option 2: Generate labels from history
     const handleGenerateLabelsFromHistory = async (purchase) => {
-        const providerName = purchases.find(p =>
-            p.invoiceNumber === purchase.invoiceNumber && p.providerId === purchase.providerId
-        )?.providerName;
-
-        if (!providerName) {
-            alert('No se pudo obtener el nombre del proveedor');
-            return;
-        }
-
-        // Get all products from this purchase
-        const purchaseProducts = purchases
-            .filter(p => p.invoiceNumber === purchase.invoiceNumber && p.providerId === purchase.providerId)
-            .map(p => ({
-                reference: p.productReference || p.productSku,
-                description: p.productName,
-                location: products.find(prod => prod.id === parseInt(p.productId))?.location || '-',
-                cost: p.price || p.cost || 0,
-                profitMargin: 300,
-                price: (p.price || p.cost || 0) * 3,
-                copies: 1
-            }));
-        setLabelProducts(purchaseProducts);
-        setIsLabelModalOpen(true);
+        // Simply open the label generator - it already has access to purchases
+        setShowLabelGenerator(true);
     };
 
     const generatePDF = async () => {
@@ -653,6 +623,13 @@ const Purchases = () => {
                 isOpen={showProductModal}
                 onClose={() => setShowProductModal(false)}
                 editProduct={editingProduct}
+                products={products}
+                brands={brands}
+                categories={categories}
+                addProduct={addProduct}
+                updateProduct={updateProduct}
+                addBrand={addBrand}
+                addCategory={addCategory}
             />
 
             <LabelGenerator

@@ -5,6 +5,7 @@ import CompanySelector from './components/CompanySelector'
 import { AuthProvider, useAuth } from './context/AuthContextSupabase'
 import { CompanyProvider, useCompany } from './context/CompanyContextSupabase'
 import { InventoryProvider } from './context/InventoryContext'
+import { ExchangeRateProvider } from './context/ExchangeRateContext'
 
 // Lazy load heavy components for better performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -18,7 +19,6 @@ const Reports = lazy(() => import('./components/Reports'));
 const Article177Report = lazy(() => import('./components/Article177Report'));
 const Clients = lazy(() => import('./components/Clients'));
 const AccountsReceivable = lazy(() => import('./components/AccountsReceivable'));
-const CashRegister = lazy(() => import('./components/CashRegister'));
 
 // Main App Content (requires auth and company)
 function AppContent() {
@@ -110,8 +110,6 @@ function AppContent() {
         return <Clients />;
       case 'receivables':
         return <AccountsReceivable />;
-      case 'cashregister':
-        return <CashRegister onNavigate={setActiveTab} />;
       case 'settings':
         return <Settings />;
       default:
@@ -146,12 +144,14 @@ function AppContent() {
   );
 }
 
-// App wrapper with all providers
+// App wrapper with all providers - Updated
 function App() {
   return (
     <AuthProvider>
       <CompanyProvider>
-        <AppContent />
+        <ExchangeRateProvider>
+          <AppContent />
+        </ExchangeRateProvider>
       </CompanyProvider>
     </AuthProvider>
   )

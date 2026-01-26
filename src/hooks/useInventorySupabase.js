@@ -51,12 +51,51 @@ export const useInventory = (companyId) => {
         setLoading(true);
 
         try {
-            // Fetch products
-            const { data: productsData } = await supabase
+            // Fetch ALL products (parallel batches for speed)
+            console.log('📦 Loading products in parallel batches...');
+            const startTime = Date.now();
+
+            // First, get total count
+            const { count: totalCount } = await supabase
                 .from(TABLES.PRODUCTS)
-                .select('*')
+                .select('*', { count: 'exact', head: true })
                 .eq('company_id', companyId);
-            setProducts(productsData || []);
+
+            if (!totalCount || totalCount === 0) {
+                console.log('⚠️ No products found');
+                setProducts([]);
+            } else {
+                // Calculate number of batches needed
+                const batchSize = 1000;
+                const numBatches = Math.ceil(totalCount / batchSize);
+
+                // Create array of promises for parallel fetching
+                const batchPromises = [];
+                for (let i = 0; i < numBatches; i++) {
+                    const from = i * batchSize;
+                    const to = from + batchSize - 1;
+
+                    batchPromises.push(
+                        supabase
+                            .from(TABLES.PRODUCTS)
+                            .select('*')
+                            .eq('company_id', companyId)
+                            .order('description')
+                            .range(from, to)
+                    );
+                }
+
+                // Fetch all batches in parallel
+                const results = await Promise.all(batchPromises);
+
+                // Combine all results
+                const allProducts = results.flatMap(result => result.data || []);
+
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                console.log(`✅ Loaded ${allProducts.length} products in ${elapsed}s (${numBatches} parallel batches)`);
+
+                setProducts(allProducts);
+            }
 
             // Fetch movements
             const { data: movementsData } = await supabase
@@ -93,13 +132,55 @@ export const useInventory = (companyId) => {
                 .select('*');
             setCategories(categoriesData || []);
 
-            // Fetch sales
-            const { data: salesData } = await supabase
+            // Fetch sales (flat structure)
+            const { data: rawSalesData, error: salesError } = await supabase
                 .from(TABLES.SALES)
                 .select('*')
                 .eq('company_id', companyId)
                 .order('created_at', { ascending: false });
-            setSales(salesData || []);
+
+            if (salesError) throw salesError;
+
+            // Manual Join: Fetch product details for these sales
+            // 1. Get unique product IDs
+            const productIds = [...new Set(rawSalesData?.map(s => s.product_id).filter(Boolean))];
+
+            // 2. Fetch products
+            let productsMap = {};
+            if (productIds.length > 0) {
+                const { data: productsData } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('id, description, sku, reference')
+                    .in('id', productIds);
+
+                // Create lookup map
+                productsData?.forEach(p => {
+                    productsMap[p.id] = p;
+                });
+            }
+
+            // 3. Transform and enrich data
+            const salesData = rawSalesData?.map(sale => {
+                const product = productsMap[sale.product_id] || {};
+                return {
+                    ...sale,
+                    sale_items: [{
+                        id: sale.id,
+                        product_id: sale.product_id,
+                        quantity: sale.quantity,
+                        price_usd: sale.amount_usd,
+                        price_bs: sale.amount_bs,
+                        product: {
+                            id: sale.product_id,
+                            description: product.description || sale.description || 'Producto',
+                            sku: product.sku || sale.sku || 'N/A',
+                            reference: product.reference || sale.reference || 'N/A'
+                        }
+                    }]
+                };
+            }) || [];
+
+            setSales(salesData);
 
             // Fetch customers
             const { data: customersData } = await supabase
@@ -178,10 +259,13 @@ export const useInventory = (companyId) => {
     // ========== PRODUCTS ==========
     const addProduct = async (productData) => {
         try {
+            if (!companyId) throw new Error('Company ID is missing (addProduct)');
+
             const { data, error } = await supabase
                 .from(TABLES.PRODUCTS)
                 .insert({
                     ...productData,
+                    min_stock: productData.minStock !== undefined ? productData.minStock : productData.min_stock,
                     company_id: companyId,
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
@@ -200,18 +284,34 @@ export const useInventory = (companyId) => {
 
     const updateProduct = async (id, updates) => {
         try {
+            if (!companyId) throw new Error('Company ID is missing');
+
+            const { minStock, ...restUpdates } = updates;
+            const dbUpdates = {
+                ...restUpdates,
+                min_stock: minStock !== undefined ? minStock : restUpdates.min_stock,
+                updated_at: new Date().toISOString()
+            };
+
             const { error } = await supabase
                 .from(TABLES.PRODUCTS)
-                .update({ ...updates, updated_at: new Date().toISOString() })
-                .eq('id', id);
+                .update(dbUpdates)
+                .eq('id', id)
+                .eq('company_id', companyId);
 
-            if (error) throw error;
+            if (error) {
+                console.error('❌ updateProduct error:', error);
+                throw error;
+            }
+            console.log('✅ Product updated successfully');
             await fetchData();
         } catch (error) {
             console.error('Error updating product:', error);
             throw error;
         }
     };
+
+
 
     const deleteProduct = async (id) => {
         try {
@@ -344,9 +444,10 @@ export const useInventory = (companyId) => {
     };
 
     // ========== SALES ==========
-    const addSale = async (saleData) => {
+    const addSale = async (saleData, paymentMethods = []) => {
         try {
-            const { data, error } = await supabase
+            // 1. Create Sale
+            const { data: sale, error: saleError } = await supabase
                 .from(TABLES.SALES)
                 .insert({
                     ...saleData,
@@ -356,9 +457,34 @@ export const useInventory = (companyId) => {
                 .select()
                 .single();
 
-            if (error) throw error;
+            if (saleError) throw saleError;
+
+            // 2. Register Payments (if any)
+            if (paymentMethods && paymentMethods.length > 0) {
+                // Get open cash session
+                if (cashSession) {
+                    const transactionPromises = paymentMethods.map(payment => {
+                        return supabase.from('cash_transactions').insert({
+                            company_id: companyId,
+                            session_id: cashSession.id,
+                            type: 'sale',
+                            amount: payment.amount,
+                            currency: payment.currency,
+                            description: `Venta ${sale.document_number} (${payment.method})`,
+                            reference: payment.reference || null,
+                            sale_id: sale.id,
+                            created_at: new Date().toISOString()
+                        });
+                    });
+
+                    await Promise.all(transactionPromises);
+                } else {
+                    console.warn('⚠️ No open cash session found. Payments recorded but not linked to session.');
+                }
+            }
+
             await fetchData();
-            return data;
+            return sale;
         } catch (error) {
             console.error('Error adding sale:', error);
             throw error;
@@ -382,6 +508,53 @@ export const useInventory = (companyId) => {
 
     const deleteSale = async (id) => {
         try {
+            // 1. Fetch sale to get items for stock reversion
+            const { data: sale, error: fetchError } = await supabase
+                .from(TABLES.SALES)
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (fetchError) throw fetchError;
+            if (!sale) throw new Error('Venta no encontrada');
+
+            console.log('🗑️ Deleting sale and reverting stock:', sale);
+
+            // 2. Revert Stock (Manual workaround if relation mapping is complex, 
+            // but we have `sales` state with parsed items. Let's use local state if possible? 
+            // No, safer to fetch or use what we have. 
+            // In `fetchData`, we manually joined. Here we need to replicate that or assume we have the data.
+            // Let's assume we can get the necessary info.
+            // Actually, `sale` from DB might not have items if it's a flat table. 
+            // Based on `fetchData`, `SALES` table has fields like `product_id`, `quantity` directly (Flat Structure).
+
+            // Revert logic for Flat Structure (1 row per sale item approach used in `addSale` loop):
+            if (sale.product_id && sale.quantity) {
+                const product = products.find(p => p.id === sale.product_id);
+                if (product) {
+                    const newQty = (product.quantity || 0) + sale.quantity;
+                    console.log(`↺ Reverting ${sale.quantity} of ${product.description}. New Qty: ${newQty}`);
+
+                    // Update Product
+                    await updateProduct(product.id, { quantity: newQty });
+
+                    // Log Movement
+                    await addMovement({
+                        productId: product.id,
+                        type: 'entrada',
+                        quantity: sale.quantity,
+                        reason: `Anulación Venta #${sale.document_number}`,
+                        status: 'approved', // Auto-approve
+                        createdBy: 'Sistema'
+                    });
+                }
+            }
+
+            // 3. Delete related transactions (Optional, but good for cleanup)
+            // Cascade delete usually handles this, but let's be sure.
+            await supabase.from('cash_transactions').delete().eq('sale_id', id);
+
+            // 4. Delete Sale
             const { error } = await supabase
                 .from(TABLES.SALES)
                 .delete()
@@ -389,6 +562,7 @@ export const useInventory = (companyId) => {
 
             if (error) throw error;
             await fetchData();
+            return true;
         } catch (error) {
             console.error('Error deleting sale:', error);
             throw error;
@@ -398,18 +572,69 @@ export const useInventory = (companyId) => {
     // ========== MOVEMENTS ==========
     const addMovement = async (movementData) => {
         try {
+            console.log('📦 addMovement called with:', movementData);
+            console.log('📦 Company ID:', companyId);
+            console.log('📦 Available products count:', products.length);
+
+            // Validate companyId
+            if (!companyId) {
+                const errorMsg = 'No hay empresa seleccionada. Por favor inicie sesión nuevamente.';
+                console.error('❌ ' + errorMsg);
+                throw new Error(errorMsg);
+            }
+
+            // Find product to get current quantity
+            const product = products.find(p => p.id === movementData.productId);
+            console.log('📦 Found product:', product ? { id: product.id, quantity: product.quantity } : 'NOT FOUND');
+
+            const currentQty = product?.quantity || 0;
+            const qty = parseInt(movementData.quantity) || 0;
+            const movementType = (movementData.type || '').toLowerCase();
+
+            // Calculate expected new quantity after this movement
+            let newQty = currentQty;
+            if (movementType === 'entrada') {
+                newQty = currentQty + qty;
+            } else if (movementType === 'salida') {
+                newQty = currentQty - qty;
+            } else if (movementType === 'ajuste') {
+                newQty = qty; // Ajuste sets absolute value
+            }
+
+            console.log(`📦 Calculation: currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}`);
+
+            // Use snake_case to match PostgreSQL column naming convention
+            // Only include columns that exist in the movements table
+            const dbRecord = {
+                company_id: companyId,
+                product_id: movementData.productId,
+                sku: movementData.sku || '',
+                product_name: movementData.productName || '', // Add simplified product name
+                type: movementData.type,
+                quantity: qty,
+                new_qty: newQty, // Add new_qty for history
+                location: movementData.location || '',
+                reason: movementData.reason || '',
+                status: movementData.status || 'pending',
+                user_name: movementData.createdBy || 'Usuario',  // Use user_name if that exists
+                date: new Date().toISOString(),
+                created_at: new Date().toISOString()
+            };
+
+            console.log('📝 Inserting movement:', dbRecord);
+
             const { data, error } = await supabase
                 .from(TABLES.MOVEMENTS)
-                .insert({
-                    ...movementData,
-                    company_id: companyId,
-                    created_at: new Date().toISOString(),
-                    date: new Date().toISOString()
-                })
+                .insert(dbRecord)
                 .select()
                 .single();
 
-            if (error) throw error;
+            if (error) {
+                console.error('❌ Insert error:', error);
+                throw error;
+            }
+
+            console.log('✅ Movement inserted:', data);
             await fetchData();
             return data;
         } catch (error) {
@@ -433,29 +658,38 @@ export const useInventory = (companyId) => {
         }
     };
 
-    const approveMovement = async (movementId, approverId, approverName) => {
+    const approveMovement = async (movement) => {
         try {
-            const movement = movements.find(m => m.id === movementId);
-            if (!movement) throw new Error('Movement not found');
+            const movementId = movement.id;
+            if (!movementId) throw new Error('Movement ID not found');
 
             // Update movement status
             await updateMovement(movementId, {
                 status: 'approved',
-                approved_by: approverName,
                 approved_at: new Date().toISOString()
             });
 
-            // Update product quantity
-            const product = products.find(p => p.id === movement.product_id);
+            // Find product - handle both productId (camelCase) and product_id (snake_case)
+            const productId = movement.productId || movement.product_id;
+            const product = products.find(p => p.id === productId);
+
             if (product) {
                 let newQuantity = product.quantity || 0;
-                if (movement.type === 'entrada') {
-                    newQuantity += movement.quantity;
-                } else if (movement.type === 'salida') {
-                    newQuantity -= movement.quantity;
-                } else if (movement.type === 'ajuste') {
-                    newQuantity = movement.quantity;
+                const movementType = (movement.type || '').toLowerCase();
+                const qty = parseInt(movement.quantity) || 0;
+
+                if (movementType === 'entrada') {
+                    newQuantity += qty;
+                } else if (movementType === 'salida') {
+                    newQuantity -= qty;
+                } else if (movementType === 'ajuste') {
+                    newQuantity = qty;
                 }
+
+                // Update the movement with newQty for display
+                await updateMovement(movementId, { newQty: newQuantity });
+
+                // Update product quantity
                 await updateProduct(product.id, { quantity: newQuantity });
             }
 
@@ -595,6 +829,11 @@ export const useInventory = (companyId) => {
     // ========== CASH SESSIONS ==========
     const openCashSession = async (cashierData, openingAmounts) => {
         try {
+            if (!companyId) {
+                console.error('❌ Attempted to open cash session without companyId');
+                throw new Error('Error: No se ha identificado la empresa. Por favor recargue la página.');
+            }
+
             const { data, error } = await supabase
                 .from(TABLES.CASH_SESSIONS)
                 .insert({
@@ -748,6 +987,52 @@ export const useInventory = (companyId) => {
         }
     };
 
+    // ========== SALE PAYMENT PROCESSING ==========
+    const processSalePayment = async (saleId, paymentMethods, userId, userName, exchangeRate) => {
+        try {
+            // Calculate total payment
+            const totalPayment = paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+            // Get current sale
+            const sale = sales.find(s => s.id === saleId);
+            if (!sale) throw new Error('Sale not found');
+
+            // Calculate new paid amount
+            const newPaidAmount = (sale.paid_amount || 0) + totalPayment;
+            const remaining = (sale.amount_usd || 0) - newPaidAmount;
+            const isPaid = remaining <= 0;
+
+            // Add payments
+            for (const pm of paymentMethods) {
+                await addPayment({
+                    sale_id: saleId,
+                    amount: pm.amount,
+                    currency: pm.currency,
+                    method: pm.method,
+                    reference: pm.reference || null,
+                    created_by: userId,
+                    created_by_name: userName
+                });
+            }
+
+            // Add cash transaction
+            await addCashTransaction({
+                type: 'sale',
+                description: `Pago ${sale.document_type} #${sale.document_number}`,
+                total_amount: totalPayment,
+                payments: paymentMethods,
+                sale_id: saleId,
+                created_by: userId,
+                created_by_name: userName
+            });
+
+            return { success: true, isPaid };
+        } catch (error) {
+            console.error('Error processing sale payment:', error);
+            throw error;
+        }
+    };
+
     // Return all states and functions
     return {
         // Data
@@ -806,6 +1091,7 @@ export const useInventory = (companyId) => {
 
         // Payment functions
         addPayment,
+        processSalePayment,
 
         // Cash session functions
         openCashSession,

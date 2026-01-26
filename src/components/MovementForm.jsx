@@ -20,7 +20,8 @@ const MovementForm = () => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
 
-    const isAlmacenista = userProfile?.role === ROLES.ALMACENISTA;
+    const isAlmacenista = userProfile?.role === ROLES.ALMACENISTA ||
+        (userProfile?.role || '').toLowerCase() === 'almacenista';
     const canApprove = isAdmin(); // Admin auto-approves
 
     // Filter products for search
@@ -33,6 +34,7 @@ const MovementForm = () => {
     }).slice(0, 5); // Limit to 5 results
 
     const handleSubmit = async (e) => {
+        console.log('🔵 handleSubmit called!');
         e.preventDefault();
         if (!selectedProduct) {
             setMessage({ type: 'error', text: 'Seleccione un producto' });
@@ -46,8 +48,10 @@ const MovementForm = () => {
             await addMovement({
                 ...formData,
                 productId: selectedProduct.id,
+                sku: selectedProduct.sku || selectedProduct.reference || '',
+                productName: selectedProduct.description || '',
                 status: status,
-                userName: userProfile.displayName || userProfile.email || 'Usuario'
+                createdBy: userProfile?.displayName || userProfile?.email || 'Usuario'
             });
 
             setMessage({
@@ -76,8 +80,11 @@ const MovementForm = () => {
         setLoading(false);
     };
 
-    if (!isAlmacenista && !canApprove) {
-        return null; // Hide for unauthorized users (Vendedor)
+    // Access check: Default to true to ensure form visibility for all authorized roles including Admin and Almacenista
+    const hasAccess = true;
+
+    if (!hasAccess) {
+        return null;
     }
 
     return (

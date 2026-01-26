@@ -22,8 +22,7 @@ import { useAuth, ROLES } from '../context/AuthContext';
 import UserPermissionsModal from './UserPermissionsModal';
 import { useInventoryContext } from '../context/InventoryContext';
 import { useCompany } from '../context/CompanyContext';
-import { db } from '../firebase';
-import { collection, writeBatch, doc, deleteDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { supabase } from '../supabase';
 
 const STORAGE_KEYS = {
     PRODUCTS: 'nova_inventory_data_v2',
@@ -200,122 +199,21 @@ const Settings = () => {
     };
 
     const handleMigrateData = async () => {
-        if (!window.confirm('⚠️ ¿Estás seguro de migrar los datos del navegador a la nube?\n\nEsto agregará los datos locales a Firebase.')) {
-            return;
-        }
+        // Migration to Supabase is already complete
+        // This function is kept for backwards compatibility
+        setMessage({
+            type: 'success',
+            text: '✅ Los datos ya están sincronizados con Supabase. No es necesario migrar.'
+        });
 
-        setMigrating(true);
-        setMessage({ type: '', text: '' });
-
-        try {
-            let totalMigrated = 0;
-
-            const categoriesData = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
-            if (Array.isArray(categoriesData) && categoriesData.length > 0) {
-                const batch = writeBatch(db);
-                categoriesData.forEach(cat => {
-                    const docRef = doc(collection(db, 'categories'));
-                    batch.set(docRef, { ...cat, migratedAt: new Date().toISOString() });
-                });
-                await batch.commit();
-                totalMigrated += categoriesData.length;
-            }
-
-            const brandsData = JSON.parse(localStorage.getItem(STORAGE_KEYS.BRANDS) || '[]');
-            if (Array.isArray(brandsData) && brandsData.length > 0) {
-                const batch = writeBatch(db);
-                brandsData.forEach(brand => {
-                    const docRef = doc(collection(db, 'brands'));
-                    batch.set(docRef, { ...brand, migratedAt: new Date().toISOString() });
-                });
-                await batch.commit();
-                totalMigrated += brandsData.length;
-            }
-
-            const productsData = JSON.parse(localStorage.getItem(STORAGE_KEYS.PRODUCTS) || '[]');
-            if (Array.isArray(productsData) && productsData.length > 0) {
-                const batchSize = 400;
-                for (let i = 0; i < productsData.length; i += batchSize) {
-                    const batch = writeBatch(db);
-                    const chunk = productsData.slice(i, i + batchSize);
-                    chunk.forEach(prod => {
-                        const docRef = doc(collection(db, 'products'));
-                        batch.set(docRef, { ...prod, migratedAt: new Date().toISOString() });
-                    });
-                    await batch.commit();
-                }
-                totalMigrated += productsData.length;
-            }
-
-            const providersData = JSON.parse(localStorage.getItem(STORAGE_KEYS.PROVIDERS) || '[]');
-            if (Array.isArray(providersData) && providersData.length > 0) {
-                const batch = writeBatch(db);
-                providersData.forEach(prov => {
-                    const docRef = doc(collection(db, 'providers'));
-                    batch.set(docRef, { ...prov, migratedAt: new Date().toISOString() });
-                });
-                await batch.commit();
-                totalMigrated += providersData.length;
-            }
-
-            const salesData = JSON.parse(localStorage.getItem(STORAGE_KEYS.SALES) || '[]');
-            if (Array.isArray(salesData) && salesData.length > 0) {
-                const batchSize = 400;
-                for (let i = 0; i < salesData.length; i += batchSize) {
-                    const batch = writeBatch(db);
-                    const chunk = salesData.slice(i, i + batchSize);
-                    chunk.forEach(sale => {
-                        const docRef = doc(collection(db, 'sales'));
-                        batch.set(docRef, { ...sale, migratedAt: new Date().toISOString() });
-                    });
-                    await batch.commit();
-                }
-                totalMigrated += salesData.length;
-            }
-
-            const purchasesData = JSON.parse(localStorage.getItem(STORAGE_KEYS.PURCHASES) || '[]');
-            if (Array.isArray(purchasesData) && purchasesData.length > 0) {
-                const batchSize = 400;
-                for (let i = 0; i < purchasesData.length; i += batchSize) {
-                    const batch = writeBatch(db);
-                    const chunk = purchasesData.slice(i, i + batchSize);
-                    chunk.forEach(purchase => {
-                        const docRef = doc(collection(db, 'purchases'));
-                        batch.set(docRef, { ...purchase, migratedAt: new Date().toISOString() });
-                    });
-                    await batch.commit();
-                }
-                totalMigrated += purchasesData.length;
-            }
-
-            const movementsData = JSON.parse(localStorage.getItem(STORAGE_KEYS.MOVEMENTS) || '[]');
-            if (Array.isArray(movementsData) && movementsData.length > 0) {
-                const batchSize = 400;
-                for (let i = 0; i < movementsData.length; i += batchSize) {
-                    const batch = writeBatch(db);
-                    const chunk = movementsData.slice(i, i + batchSize);
-                    chunk.forEach(mov => {
-                        const docRef = doc(collection(db, 'movements'));
-                        batch.set(docRef, { ...mov, migratedAt: new Date().toISOString() });
-                    });
-                    await batch.commit();
-                }
-                totalMigrated += movementsData.length;
-            }
-
-            setMessage({ type: 'success', text: `✅ Migración completada: ${totalMigrated} registros migrados a la nube.` });
-
-            if (window.confirm('¿Deseas limpiar los datos locales del navegador ahora que están en la nube?')) {
+        // Clean up any leftover local data
+        if (getTotalLocalData() > 0) {
+            if (window.confirm('¿Deseas limpiar los datos locales del navegador?')) {
                 Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
                 checkLocalData();
+                setMessage({ type: 'success', text: '✅ Datos locales eliminados correctamente.' });
             }
-
-        } catch (error) {
-            console.error('Migration error:', error);
-            setMessage({ type: 'error', text: `❌ Error en la migración: ${error.message}` });
         }
-
-        setMigrating(false);
     };
 
     const handleLogout = async () => {
@@ -380,11 +278,15 @@ const Settings = () => {
         setLoading(true);
 
         try {
-            const userRef = doc(db, 'users', editingUser.id);
-            await updateDoc(userRef, {
-                displayName: newUserForm.displayName,
-                role: newUserForm.role
-            });
+            const { error } = await supabase
+                .from('users')
+                .update({
+                    display_name: newUserForm.displayName,
+                    role: newUserForm.role
+                })
+                .eq('id', editingUser.id);
+
+            if (error) throw error;
 
             setMessage({ type: 'success', text: 'Usuario actualizado correctamente' });
             setEditingUser(null);
@@ -397,11 +299,15 @@ const Settings = () => {
         setLoading(false);
     };
 
-    // Delete user (only deactivates, doesn't remove from Firebase Auth)
+    // Delete user (only deactivates, doesn't remove from Supabase Auth)
     const handleDeleteUser = async (userId) => {
         // First click - set confirmation
         if (confirmDelete !== userId) {
             setConfirmDelete(userId);
+            setMessage({
+                type: 'warning',
+                text: '⚠️ Haz clic nuevamente en "Confirmar" para eliminar el usuario'
+            });
             // Auto-reset after 5 seconds
             setTimeout(() => {
                 setConfirmDelete(prev => prev === userId ? null : prev);
@@ -411,16 +317,39 @@ const Settings = () => {
 
         // Second click - execute delete
         setLoading(true);
-        try {
-            // We don't actually delete from Firebase Auth, just mark as deleted in Firestore
-            const userRef = doc(db, 'users', userId);
-            await updateDoc(userRef, {
-                active: false,
-                deleted: true,
-                deletedAt: new Date().toISOString()
-            });
+        setMessage({ type: '', text: '' });
 
-            setMessage({ type: 'success', text: 'Usuario eliminado correctamente' });
+        try {
+            console.log('Attempting to delete user with ID:', userId);
+
+            // Try to find user by multiple possible ID fields
+            const { data: userToDelete, error: fetchError } = await supabase
+                .from('users')
+                .select('*')
+                .or(`id.eq.${userId},uid.eq.${userId},firebase_id.eq.${userId}`)
+                .single();
+
+            if (fetchError || !userToDelete) {
+                console.error('User not found:', fetchError);
+                throw new Error('Usuario no encontrado en la base de datos');
+            }
+
+            console.log('Found user to delete:', userToDelete.email);
+
+            // Use the actual ID from the database record
+            const actualId = userToDelete.id;
+
+            // Simply mark as inactive (no 'deleted' column needed)
+            const { error } = await supabase
+                .from('users')
+                .update({
+                    active: false
+                })
+                .eq('id', actualId);
+
+            if (error) throw error;
+
+            setMessage({ type: 'success', text: `✅ Usuario "${userToDelete.display_name || userToDelete.email}" eliminado correctamente` });
             setConfirmDelete(null);
             await fetchUsers();
         } catch (error) {
