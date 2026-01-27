@@ -12,7 +12,7 @@ const Dashboard = lazy(() => import('./components/Dashboard'));
 const Inventory = lazy(() => import('./components/Inventory'));
 const InventoryControl = lazy(() => import('./components/InventoryControl'));
 const Purchases = lazy(() => import('./components/Purchases'));
-const POS = lazy(() => import('./components/POS'));
+const SalesModule = lazy(() => import('./modules/sales/SalesModule'));
 const Settings = lazy(() => import('./components/Settings'));
 const NovaMail = lazy(() => import('./components/NovaMail'));
 const Reports = lazy(() => import('./components/Reports'));
@@ -99,7 +99,7 @@ function AppContent() {
       case 'purchases':
         return <Purchases />;
       case 'pos':
-        return <POS />;
+        return <SalesModule />;
       case 'mail':
         return <NovaMail />;
       case 'reports':

@@ -18,22 +18,28 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
 
     // Filter sales based on range
     const filteredSales = useMemo(() => {
-        return sales.filter(sale => {
-            const saleDate = new Date(sale.createdAt || sale.created_at);
-            const start = new Date(dateRange.start);
-            const end = new Date(dateRange.end);
+        if (!sales || sales.length === 0) return [];
 
-            // Adjust end date to include the full day (23:59:59.999)
-            // Use local time components to avoid timezone shifts
-            const endFull = new Date(end);
-            endFull.setHours(23, 59, 59, 999);
+        const filtered = sales.filter(sale => {
+            // Obtener fecha de la venta - probar multiples campos
+            const dateField = sale.created_at || sale.createdAt || sale.date;
+            if (!dateField) return false;
 
-            // Adjust start to beginning of day
-            const startFull = new Date(start);
-            startFull.setHours(0, 0, 0, 0);
+            // Extraer solo la parte de fecha (YYYY-MM-DD) para evitar problemas de timezone
+            const saleDate = new Date(dateField);
+            if (isNaN(saleDate.getTime())) return false;
 
-            return saleDate >= startFull && saleDate <= endFull;
-        }).sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at));
+            // Obtener fecha local de la venta
+            const saleDateStr = saleDate.toLocaleDateString('en-CA'); // Formato YYYY-MM-DD
+
+            // Comparar strings de fecha directamente
+            return saleDateStr >= dateRange.start && saleDateStr <= dateRange.end;
+        });
+
+
+        return filtered.sort((a, b) =>
+            new Date(b.created_at || b.createdAt || b.date) - new Date(a.created_at || a.createdAt || a.date)
+        );
     }, [sales, dateRange]);
 
     // Calculate totals breakdown for FILTERED sales
@@ -79,14 +85,14 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
             doc.rect(14, 45, 180, 25, 'FD');
 
             doc.setFontSize(10);
-            doc.text('Enviado a Caja (Pendiente):', 20, 55);
+            doc.text('Pendiente de Pago:', 20, 55);
             doc.text(`${totals.pendingCount} ventas - $${totals.pendingUSD.toFixed(2)}`, 20, 62);
 
-            doc.text('Cobrado (Procesado):', 100, 55);
+            doc.text('Pagado:', 100, 55);
             doc.text(`${totals.processedCount} ventas - $${totals.processedUSD.toFixed(2)}`, 100, 62);
 
             // Table
-            const tableColumn = ["Fecha/Hora", "Cliente", "Estado", "Total ($)", "Total (Bs)"];
+            const tableColumn = ["Fecha/Hora", "Producto", "Cliente", "Estado", "Total ($)", "Total (Bs)"];
             const tableRows = [];
 
             filteredSales.forEach(sale => {
@@ -98,8 +104,9 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
 
                 const saleData = [
                     dateStr,
+                    sale.description || sale.product_name || 'Producto',
                     sale.clientName || sale.customer?.name || 'Cliente Casual',
-                    isPending ? 'En Caja' : 'Cobrado',
+                    isPending ? 'Pendiente' : 'Pagado',
                     `$${amountUSD.toFixed(2)}`,
                     `Bs ${amountBs.toFixed(2)}`
                 ];
@@ -113,7 +120,7 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                 theme: 'grid',
                 headStyles: { fillColor: [66, 66, 66] },
                 styles: { fontSize: 9 },
-                foot: [['', '', 'TOTAL GENERAL', `$${totals.totalUSD.toFixed(2)}`, `Bs ${totals.totalBs.toFixed(2)}`]],
+                foot: [['', '', '', 'TOTAL GENERAL', `$${totals.totalUSD.toFixed(2)}`, `Bs ${totals.totalBs.toFixed(2)}`]],
                 footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
             });
 
@@ -191,7 +198,7 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                     {/* Pendiente en Caja */}
                     <div style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
                         <div style={{ fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span>⏳ ENVIADO A CAJA</span>
+                            <span>⏳ PENDIENTE</span>
                         </div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--warning)', margin: '0.5rem 0' }}>
                             ${totals.pendingUSD.toFixed(2)}
@@ -204,7 +211,7 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                     {/* Cobrado */}
                     <div style={{ padding: '1rem', background: 'rgba(16, 185, 129, 0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                         <div style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <span>✅ COBRADO</span>
+                            <span>✅ PAGADO</span>
                         </div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)', margin: '0.5rem 0' }}>
                             ${totals.processedUSD.toFixed(2)}
@@ -241,6 +248,7 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                         <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-secondary)', zIndex: 1 }}>
                             <tr>
                                 <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>Fecha/Hora</th>
+                                <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>Producto</th>
                                 <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>Cliente</th>
                                 <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>Estado</th>
                                 <th style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '1px solid var(--border-color)' }}>Monto ($)</th>
@@ -250,8 +258,8 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                         <tbody>
                             {filteredSales.length === 0 ? (
                                 <tr>
-                                    <td colSpan="5" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                                        No hay movimientos en este rango
+                                    <td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                        No hay ventas en este rango
                                     </td>
                                 </tr>
                             ) : (
@@ -266,6 +274,10 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                                             <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
                                                 {date.toLocaleDateString()} <small style={{ color: 'var(--text-secondary)' }}>{date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
                                             </td>
+                                            <td style={{ padding: '0.75rem', fontWeight: '600', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {sale.description || sale.product_name || `Venta #${sale.id?.slice(-6) || ''}`}
+                                                {sale.quantity > 1 && <small style={{ color: 'var(--text-secondary)', marginLeft: '0.25rem' }}>x{sale.quantity}</small>}
+                                            </td>
                                             <td style={{ padding: '0.75rem' }}>{sale.clientName || sale.customer?.name || 'Cliente Casual'}</td>
                                             <td style={{ padding: '0.75rem', textAlign: 'center' }}>
                                                 <span style={{
@@ -277,7 +289,7 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                                                     fontWeight: 600,
                                                     border: `1px solid ${isPending ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`
                                                 }}>
-                                                    {isPending ? 'En Caja' : 'Cobrado'}
+                                                    {isPending ? 'Pendiente' : 'Pagado'}
                                                 </span>
                                             </td>
                                             <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 'bold' }}>

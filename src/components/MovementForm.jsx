@@ -51,7 +51,7 @@ const MovementForm = () => {
                 sku: selectedProduct.sku || selectedProduct.reference || '',
                 productName: selectedProduct.description || '',
                 status: status,
-                createdBy: userProfile?.displayName || userProfile?.email || 'Usuario'
+                createdBy: userProfile?.display_name || userProfile?.displayName || userProfile?.email || 'Usuario'
             });
 
             setMessage({

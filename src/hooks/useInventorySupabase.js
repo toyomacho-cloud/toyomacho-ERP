@@ -446,6 +446,8 @@ export const useInventory = (companyId) => {
     // ========== SALES ==========
     const addSale = async (saleData, paymentMethods = []) => {
         try {
+            const esPresupuesto = saleData.is_quote || saleData.document_type === 'presupuesto';
+
             // 1. Create Sale
             const { data: sale, error: saleError } = await supabase
                 .from(TABLES.SALES)
@@ -459,7 +461,64 @@ export const useInventory = (companyId) => {
 
             if (saleError) throw saleError;
 
-            // 2. Register Payments (if any)
+            // 2. Descontar stock automaticamente (solo si NO es presupuesto)
+            if (!esPresupuesto && saleData.product_id && saleData.quantity) {
+                const productId = saleData.product_id;
+                const cantidadVendida = parseInt(saleData.quantity) || 0;
+
+                // Buscar producto para obtener stock actual
+                let product = products.find(p => p.id === productId);
+                if (!product) {
+                    const { data: dbProduct } = await supabase
+                        .from(TABLES.PRODUCTS)
+                        .select('*')
+                        .eq('id', productId)
+                        .eq('company_id', companyId)
+                        .single();
+                    product = dbProduct;
+                }
+
+                if (product) {
+                    const stockActual = product.quantity || 0;
+                    const nuevoStock = Math.max(0, stockActual - cantidadVendida);
+
+                    console.log(`🛒 Venta: Descontando ${cantidadVendida} de ${product.description || product.sku}. Stock: ${stockActual} → ${nuevoStock}`);
+
+                    // 2a. Actualizar stock del producto
+                    await supabase
+                        .from(TABLES.PRODUCTS)
+                        .update({
+                            quantity: nuevoStock,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', productId)
+                        .eq('company_id', companyId);
+
+                    // 2b. Crear movimiento de salida (auto-aprobado)
+                    await supabase
+                        .from(TABLES.MOVEMENTS)
+                        .insert({
+                            company_id: companyId,
+                            product_id: productId,
+                            sku: product.sku || product.reference || '',
+                            product_name: product.description || '',
+                            type: 'Salida',
+                            quantity: cantidadVendida,
+                            new_qty: nuevoStock,
+                            location: product.location || '',
+                            reason: `Venta ${sale.document_number || '#' + sale.id}`,
+                            status: 'approved',
+                            user_name: 'Sistema (Venta)',
+                            date: new Date().toISOString(),
+                            created_at: new Date().toISOString(),
+                            approved_at: new Date().toISOString()
+                        });
+
+                    console.log(`✅ Movimiento de salida creado para venta ${sale.document_number}`);
+                }
+            }
+
+            // 3. Register Payments (if any)
             if (paymentMethods && paymentMethods.length > 0) {
                 // Get open cash session
                 if (cashSession) {
@@ -574,22 +633,45 @@ export const useInventory = (companyId) => {
         try {
             console.log('📦 addMovement called with:', movementData);
             console.log('📦 Company ID:', companyId);
-            console.log('📦 Available products count:', products.length);
 
             // Validate companyId
             if (!companyId) {
-                const errorMsg = 'No hay empresa seleccionada. Por favor inicie sesión nuevamente.';
+                const errorMsg = 'No hay empresa seleccionada. Por favor inicie sesion nuevamente.';
                 console.error('❌ ' + errorMsg);
                 throw new Error(errorMsg);
             }
 
-            // Find product to get current quantity
-            const product = products.find(p => p.id === movementData.productId);
-            console.log('📦 Found product:', product ? { id: product.id, quantity: product.quantity } : 'NOT FOUND');
+            const productId = movementData.productId;
+            if (!productId) {
+                throw new Error('productId es requerido para el movimiento');
+            }
+
+            // Buscar producto en cache local primero
+            let product = products.find(p => p.id === productId);
+
+            // Si no esta en cache, buscar en DB directamente
+            if (!product) {
+                console.log('⚠️ Producto no en cache, buscando en DB...');
+                const { data: dbProduct, error: fetchError } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('*')
+                    .eq('id', productId)
+                    .eq('company_id', companyId)
+                    .single();
+
+                if (fetchError) {
+                    console.error('❌ Error buscando producto:', fetchError);
+                } else {
+                    product = dbProduct;
+                }
+            }
+
+            console.log('📦 Found product:', product ? { id: product.id, quantity: product.quantity, description: product.description } : 'NOT FOUND');
 
             const currentQty = product?.quantity || 0;
             const qty = parseInt(movementData.quantity) || 0;
             const movementType = (movementData.type || '').toLowerCase();
+            const status = movementData.status || 'pending';
 
             // Calculate expected new quantity after this movement
             let newQty = currentQty;
@@ -601,25 +683,29 @@ export const useInventory = (companyId) => {
                 newQty = qty; // Ajuste sets absolute value
             }
 
-            console.log(`📦 Calculation: currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}`);
+            console.log(`📦 Calculation: currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}, status=${status}`);
 
             // Use snake_case to match PostgreSQL column naming convention
-            // Only include columns that exist in the movements table
             const dbRecord = {
                 company_id: companyId,
-                product_id: movementData.productId,
+                product_id: productId,
                 sku: movementData.sku || '',
-                product_name: movementData.productName || '', // Add simplified product name
+                product_name: movementData.productName || '',
                 type: movementData.type,
                 quantity: qty,
-                new_qty: newQty, // Add new_qty for history
+                new_qty: newQty,
                 location: movementData.location || '',
                 reason: movementData.reason || '',
-                status: movementData.status || 'pending',
-                user_name: movementData.createdBy || 'Usuario',  // Use user_name if that exists
+                status: status,
+                user_name: movementData.createdBy || 'Usuario',
                 date: new Date().toISOString(),
                 created_at: new Date().toISOString()
             };
+
+            // Si es approved, agregar fecha de aprobacion
+            if (status === 'approved') {
+                dbRecord.approved_at = new Date().toISOString();
+            }
 
             console.log('📝 Inserting movement:', dbRecord);
 
@@ -635,6 +721,30 @@ export const useInventory = (companyId) => {
             }
 
             console.log('✅ Movement inserted:', data);
+
+            // Si el movimiento es aprobado directamente, actualizar el producto
+            if (status === 'approved' && productId) {
+                console.log(`📦 Actualizando producto ${productId} a cantidad: ${newQty}`);
+
+                const { data: updatedProduct, error: updateError } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .update({
+                        quantity: newQty,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', productId)
+                    .eq('company_id', companyId)
+                    .select()
+                    .single();
+
+                if (updateError) {
+                    console.error('❌ Error updating product quantity:', updateError);
+                    throw updateError;
+                }
+
+                console.log('✅ Product quantity updated:', updatedProduct);
+            }
+
             await fetchData();
             return data;
         } catch (error) {

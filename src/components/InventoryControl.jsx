@@ -128,7 +128,7 @@ const InventoryControl = () => {
                                             </td>
                                             <td style={{ padding: '0.75rem' }}>{m.type}</td>
                                             <td style={{ padding: '0.75rem', fontWeight: 'bold' }}>{m.quantity}</td>
-                                            <td style={{ padding: '0.75rem' }}>{m.createdBy}</td>
+                                            <td style={{ padding: '0.75rem' }}>{m.user_name || m.createdBy || 'Sin asignar'}</td>
                                             <td style={{ padding: '0.75rem' }}>
                                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                                                     <button
@@ -238,10 +238,10 @@ const InventoryControl = () => {
                                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                         fontSize: '0.65rem', fontWeight: 'bold', flexShrink: 0
                                                     }}>
-                                                        {m.createdBy ? m.createdBy.charAt(0).toUpperCase() : 'S'}
+                                                        {(m.user_name || m.createdBy) ? (m.user_name || m.createdBy).charAt(0).toUpperCase() : 'S'}
                                                     </div>
                                                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '110px' }}>
-                                                        {m.createdBy || 'Sistema'}
+                                                        {m.user_name || m.createdBy || 'Sistema'}
                                                     </span>
                                                 </div>
                                             </td>
