@@ -73,6 +73,7 @@ export const prepararDatosVenta = (carritoActivo, calculos, tasaCambio, ventasDe
     const numeroDocumento = prefijo + String(ventasDelDia.length + 1).padStart(6, '0');
 
     // Mapear items del carrito a items de venta
+    const tipoDocumento = carritoActivo.tipoDocumento || 'pedido';
     const itemsVenta = carritoActivo.carrito.map(item => ({
         product_id: item.productoId,
         sku: item.sku,
@@ -88,10 +89,10 @@ export const prepararDatosVenta = (carritoActivo, calculos, tasaCambio, ventasDe
         due_date: fechaVencimiento,
         payment_currency: 'USD',
         exchange_rate: tasaCambio,
-        document_type: esPresupuesto ? 'presupuesto' : carritoActivo.tipoDocumento,
+        document_type: esPresupuesto ? 'presupuesto' : tipoDocumento,
         document_number: numeroDocumento,
-        has_iva: carritoActivo.tipoDocumento === 'factura' && !esPresupuesto,
-        iva_amount: carritoActivo.tipoDocumento === 'factura' && !esPresupuesto
+        has_iva: tipoDocumento === 'factura' && !esPresupuesto,
+        iva_amount: tipoDocumento === 'factura' && !esPresupuesto
             ? (item.precioUSD * item.cantidad) * 0.16
             : 0,
         customer_id: carritoActivo.tipoCliente === 'rapida' ? null : carritoActivo.clienteSeleccionado?.id,
@@ -127,7 +128,7 @@ export const generarDatosFactura = (carritoActivo, calculos, numeroDocumento, ta
     return {
         items: carritoActivo.carrito,
         cliente: carritoActivo.tipoCliente === 'rapida' ? null : carritoActivo.clienteSeleccionado,
-        tipoDocumento: carritoActivo.tipoDocumento,
+        tipoDocumento: carritoActivo.tipoDocumento || 'pedido',
         tipoPago: carritoActivo.tipoVenta,
         diasCredito: carritoActivo.tipoVenta === 'credito' ? carritoActivo.diasCredito : null,
         fechaVencimiento,
