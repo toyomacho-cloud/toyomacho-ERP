@@ -105,10 +105,16 @@ const SalesPanel = ({
     const finalizarVenta = async (generarPDF = false) => {
         if (carritoActivo.carrito.length === 0) return;
 
+        console.log('🛒 === INICIANDO FINALIZACION VENTA ===');
+        console.log('📦 Carrito activo:', carritoActivo);
+        console.log('💰 Calculos:', { subtotal, iva, total, totalBs });
+        console.log('📊 Tasa cambio:', tasaCambio);
+
         try {
             const ventasDelDia = ventas.filter(s =>
                 s.date === new Date().toISOString().split('T')[0]
             );
+            console.log('📅 Ventas del dia:', ventasDelDia.length);
 
             const { items, numeroDocumento, fechaVencimiento, esPresupuesto } = prepararDatosVenta(
                 carritoActivo,
@@ -117,15 +123,22 @@ const SalesPanel = ({
                 ventasDelDia
             );
 
+            console.log('📝 Items preparados:', items);
+            console.log('🔢 Numero documento:', numeroDocumento);
+
             // Guardar ventas
-            for (const item of items) {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                console.log(`💾 Guardando item ${i + 1}/${items.length}:`, item);
                 await onGuardarVenta(item, []);
+                console.log(`✅ Item ${i + 1} guardado`);
             }
+
+            console.log('🎉 Todas las ventas guardadas exitosamente');
 
             // Generar PDF si se solicito
             if (generarPDF) {
                 console.log('📄 Generando PDF para venta', numeroDocumento);
-                // TODO: Implementar generacion de PDF
                 alert(`Venta ${numeroDocumento} completada. PDF en desarrollo.`);
             } else {
                 alert(`Venta ${numeroDocumento} completada exitosamente.`);
@@ -135,8 +148,10 @@ const SalesPanel = ({
             limpiarCarrito();
 
         } catch (error) {
-            console.error('Error al finalizar venta:', error);
-            alert('Error al finalizar la venta');
+            console.error('❌ Error al finalizar venta:', error);
+            console.error('❌ Error message:', error.message);
+            console.error('❌ Error stack:', error.stack);
+            alert(`Error al finalizar la venta: ${error.message || 'Error desconocido'}`);
         }
     };
 

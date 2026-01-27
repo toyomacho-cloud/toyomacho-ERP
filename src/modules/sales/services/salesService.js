@@ -76,8 +76,7 @@ export const prepararDatosVenta = (carritoActivo, calculos, tasaCambio, ventasDe
     const tipoDocumento = carritoActivo.tipoDocumento || 'pedido';
     const itemsVenta = carritoActivo.carrito.map(item => ({
         product_id: item.productoId,
-        sku: item.sku,
-        reference: item.referencia || '',
+        sku: item.sku || item.referencia || '',
         description: item.descripcion,
         quantity: item.cantidad,
         unit_price: item.precioUSD,

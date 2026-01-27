@@ -241,7 +241,14 @@ const InventoryControl = () => {
                                                         {(m.user_name || m.createdBy) ? (m.user_name || m.createdBy).charAt(0).toUpperCase() : 'S'}
                                                     </div>
                                                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '110px' }}>
-                                                        {m.user_name || m.createdBy || 'Sistema'}
+                                                        {(() => {
+                                                            const nombre = m.user_name || m.createdBy || 'Sistema';
+                                                            // Si parece un email, extraer nombre antes del @
+                                                            if (nombre.includes('@')) {
+                                                                return nombre.split('@')[0].replace(/[._]/g, ' ');
+                                                            }
+                                                            return nombre;
+                                                        })()}
                                                     </span>
                                                 </div>
                                             </td>
