@@ -1,24 +1,20 @@
 /**
  * WizardNav Component
- * Navegacion por pasos del wizard de ventas
+ * Navegacion por pasos del wizard de ventas (simplificado a 3 pasos)
  */
 import React from 'react';
-import { Package, User, Receipt, FileCheck, CheckCircle } from 'lucide-react';
+import { Package, User, CreditCard, CheckCircle } from 'lucide-react';
 
 const ICONOS_PASO = {
     1: Package,
     2: User,
-    3: Receipt,
-    4: FileCheck,
-    5: CheckCircle
+    3: CreditCard
 };
 
 const ETIQUETAS_PASO = {
     1: 'Productos',
     2: 'Cliente',
-    3: 'Tipo Venta',
-    4: 'Documento',
-    5: 'Listo'
+    3: 'Pago'
 };
 
 const WizardNav = ({ pasoActual, onIrAPaso }) => {
@@ -28,7 +24,7 @@ const WizardNav = ({ pasoActual, onIrAPaso }) => {
             gap: '1rem',
             background: 'transparent'
         }}>
-            {[1, 2, 3, 4, 5].map((paso) => {
+            {[1, 2, 3].map((paso) => {
                 const Icono = ICONOS_PASO[paso];
                 const etiqueta = ETIQUETAS_PASO[paso];
                 const esActivo = pasoActual === paso;
@@ -85,3 +81,4 @@ const WizardNav = ({ pasoActual, onIrAPaso }) => {
 };
 
 export default WizardNav;
+

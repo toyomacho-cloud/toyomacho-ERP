@@ -110,18 +110,39 @@ const CartTable = ({
                             justifyContent: 'space-between',
                             alignItems: 'center'
                         }}>
-                            {/* Precio unitario */}
+                            {/* Precio unitario editable */}
                             <div style={{
                                 fontSize: '0.75rem',
                                 color: '#64748b',
                                 display: 'flex',
                                 flexDirection: 'column'
                             }}>
-                                <span>
-                                    P/U: <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>
-                                        {formatearUSD(item.precioUSD)}
-                                    </span> | {formatearBs(item.precioUSD * tasaCambio)}
-                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span>P/U:</span>
+                                    <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>$</span>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={item.precioUSD}
+                                        onChange={(e) => onActualizarPrecio && onActualizarPrecio(indice, parseFloat(e.target.value) || 0)}
+                                        style={{
+                                            width: '70px',
+                                            border: '1px solid #e2e8f0',
+                                            borderRadius: '4px',
+                                            padding: '2px 6px',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 'bold',
+                                            color: 'var(--success)',
+                                            background: '#f8fafc',
+                                            textAlign: 'right'
+                                        }}
+                                        title="Editar precio"
+                                    />
+                                    <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                                        | {formatearBs(item.precioUSD * tasaCambio)}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* Controles de cantidad */}

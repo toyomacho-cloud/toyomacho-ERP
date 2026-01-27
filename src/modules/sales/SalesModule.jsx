@@ -11,13 +11,18 @@ import DailySalesModal from '../../components/DailySalesModal';
 
 const SalesModule = () => {
     const { currentCompany } = useCompany();
-    const { products, sales, customers, addSale } = useInventory(currentCompany?.id);
+    const { products, sales, customers, addSale, addCustomer } = useInventory(currentCompany?.id);
     const { bcvRate, usdtRate, loading: loadingRates, refreshRates } = useExchangeRates();
     const [showSalesModal, setShowSalesModal] = useState(false);
 
     // Handler para guardar venta
     const handleGuardarVenta = async (saleData, paymentMethods) => {
         return await addSale(saleData, paymentMethods);
+    };
+
+    // Handler para crear cliente nuevo
+    const handleCrearCliente = async (customerData) => {
+        return await addCustomer(customerData);
     };
 
     return (
@@ -31,6 +36,7 @@ const SalesModule = () => {
                 cargandoTasas={loadingRates}
                 onRefrescarTasas={refreshRates}
                 onGuardarVenta={handleGuardarVenta}
+                onCrearCliente={handleCrearCliente}
                 onMostrarVentasDelDia={() => setShowSalesModal(true)}
             />
 
@@ -49,3 +55,4 @@ const SalesModule = () => {
 };
 
 export default SalesModule;
+

@@ -16,9 +16,7 @@ import {
 import ProductSearch from './ProductSearch';
 import CartTable from './CartTable';
 import CustomerSelector from './CustomerSelector';
-import SaleTypeSelector from './SaleTypeSelector';
-import PaymentSelector from './PaymentSelector';
-import SaleSummary from './SaleSummary';
+import SimplifiedPayment from './SimplifiedPayment';
 import DailyStatsBar from './DailyStatsBar';
 import WizardNav from './WizardNav';
 
@@ -36,6 +34,7 @@ const SalesPanel = ({
     cargandoTasas,
     onRefrescarTasas,
     onGuardarVenta,
+    onCrearCliente,
     onMostrarVentasDelDia
 }) => {
     // Estado de tasa de cambio
@@ -62,6 +61,7 @@ const SalesPanel = ({
         agregarProducto,
         eliminarProducto,
         actualizarCantidad,
+        actualizarPrecio,
         limpiarCarrito,
         seleccionarCliente,
         ventaRapida,
@@ -102,14 +102,8 @@ const SalesPanel = ({
     );
 
     // Finalizar venta
-    const finalizarVenta = async () => {
+    const finalizarVenta = async (generarPDF = false) => {
         if (carritoActivo.carrito.length === 0) return;
-
-        // Validar pago para ventas de contado
-        if (carritoActivo.tipoVenta === 'contado' && !pagadoCompleto && modoVenta !== 'presupuesto') {
-            alert('El monto pagado debe cubrir el total de la venta.');
-            return;
-        }
 
         try {
             const ventasDelDia = ventas.filter(s =>
@@ -125,23 +119,20 @@ const SalesPanel = ({
 
             // Guardar ventas
             for (const item of items) {
-                const esaPrimero = item === items[0];
-                const pagosAEnviar = (esaPrimero && !esPresupuesto && carritoActivo.tipoVenta === 'contado')
-                    ? carritoActivo.metodosPago
-                    : [];
-                await onGuardarVenta(item, pagosAEnviar);
+                await onGuardarVenta(item, []);
             }
 
-            // Generar datos de factura completada
-            const datosFactura = generarDatosFactura(
-                carritoActivo,
-                { subtotal, iva, total, totalBs },
-                numeroDocumento,
-                tasaCambio
-            );
+            // Generar PDF si se solicito
+            if (generarPDF) {
+                console.log('📄 Generando PDF para venta', numeroDocumento);
+                // TODO: Implementar generacion de PDF
+                alert(`Venta ${numeroDocumento} completada. PDF en desarrollo.`);
+            } else {
+                alert(`Venta ${numeroDocumento} completada exitosamente.`);
+            }
 
-            setVentaCompletada(datosFactura);
-            actualizarCarritoActivo({ pasoActual: 5 });
+            // Limpiar carrito y reiniciar
+            limpiarCarrito();
 
         } catch (error) {
             console.error('Error al finalizar venta:', error);
@@ -402,6 +393,7 @@ const SalesPanel = ({
                             totalBs={totalBs}
                             onEliminarProducto={eliminarProducto}
                             onActualizarCantidad={actualizarCantidad}
+                            onActualizarPrecio={actualizarPrecio}
                             onLimpiarCarrito={limpiarCarrito}
                             onSiguiente={siguientePaso}
                         />
@@ -416,51 +408,26 @@ const SalesPanel = ({
                         tipoCliente={tipoCliente}
                         onSeleccionarCliente={seleccionarCliente}
                         onVentaRapida={ventaRapida}
+                        onCrearCliente={onCrearCliente}
                         onAnterior={pasoAnterior}
                         onSiguiente={siguientePaso}
                     />
                 )}
 
-                {/* PASO 3: TIPO DE VENTA */}
+                {/* PASO 3: PAGO SIMPLIFICADO */}
                 {pasoActual === 3 && (
-                    <SaleTypeSelector
+                    <SimplifiedPayment
+                        total={total}
+                        totalBs={totalBs}
+                        tasaCambio={tasaCambio}
                         tipoVenta={tipoVenta}
                         diasCredito={diasCredito}
-                        tipoDocumento={tipoDocumento}
-                        modoVenta={modoVenta}
+                        clienteSeleccionado={clienteSeleccionado}
+                        tipoCliente={tipoCliente}
                         onEstablecerTipoVenta={establecerTipoVenta}
                         onEstablecerDiasCredito={establecerDiasCredito}
-                        onEstablecerTipoDocumento={establecerTipoDocumento}
-                        onAnterior={pasoAnterior}
-                        onSiguiente={siguientePaso}
-                        onFinalizar={finalizarVenta}
-                    />
-                )}
-
-                {/* PASO 4: PAGO */}
-                {pasoActual === 4 && (
-                    <PaymentSelector
-                        metodosPago={metodosPago}
-                        total={total}
-                        totalPagado={totalPagado}
-                        restante={restante}
-                        pagadoCompleto={pagadoCompleto}
-                        tasaCambio={tasaCambio}
-                        onAgregarMetodo={agregarMetodoPago}
-                        onActualizarMetodo={actualizarMetodoPago}
-                        onEliminarMetodo={eliminarMetodoPago}
                         onAnterior={pasoAnterior}
                         onFinalizar={finalizarVenta}
-                    />
-                )}
-
-                {/* PASO 5: RESUMEN */}
-                {pasoActual === 5 && (
-                    <SaleSummary
-                        ventaCompletada={ventaCompletada}
-                        onNuevaVenta={iniciarNuevaVenta}
-                        onImprimir={() => window.print()}
-                        onDescargar={() => alert('Descarga en desarrollo')}
                     />
                 )}
             </div>
