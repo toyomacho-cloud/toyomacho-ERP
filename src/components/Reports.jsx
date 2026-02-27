@@ -20,9 +20,24 @@ const Reports = () => {
     const allRecords = useMemo(() => {
         const records = [];
 
+        // Asegurar que los arrays existan
+        const safeMovements = movements || [];
+        const safePurchases = purchases || [];
+        const safeSales = sales || [];
+        const safeProducts = products || [];
+
+        // DEBUG: Verificar datos
+        console.log('📊 Reports - Datos:', {
+            movements: safeMovements.length,
+            purchases: safePurchases.length,
+            sales: safeSales.length,
+            products: safeProducts.length
+        });
+
         // Process movements
-        movements.forEach(m => {
-            const product = products.find(p => p.id === m.productId);
+        safeMovements.forEach(m => {
+            // Usar snake_case para coincidir con Supabase (product_id, product_name, etc.)
+            const product = safeProducts.find(p => p.id === m.product_id);
             const price = product?.price || m.cost || 0;
             const subtotal = price * m.quantity;
             const iva = m.type !== 'Ajuste' ? subtotal * IVA_RATE : 0;
@@ -32,28 +47,30 @@ const Reports = () => {
                 source: 'movement',
                 date: m.date,
                 type: m.type,
-                sku: m.sku || product?.sku || '-',
-                productName: m.productName || product?.description || '-',
+                sku: m.sku || product?.sku || product?.reference || '-',
+                productName: m.product_name || product?.description || '-',
+                location: m.location || product?.location || '-',
                 quantity: m.quantity,
                 unitPrice: price,
                 subtotal: subtotal,
                 iva: iva,
                 total: subtotal + iva,
-                provider: m.providerName || '-',
+                provider: m.provider_name || '-',
                 reason: m.reason || '-',
-                user: m.createdBy || 'Sistema',
+                user: m.user_name || 'Sistema',
                 status: m.status || 'approved'
             });
         });
 
         // Process purchases (if not already in movements)
-        purchases.forEach(p => {
-            const existsInMovements = movements.some(m =>
-                m.reason?.includes(p.invoiceNumber) &&
-                m.productId === p.productId
+        safePurchases.forEach(p => {
+            const existsInMovements = safeMovements.some(m =>
+                m.reason?.includes(p.invoice_number || p.invoiceNumber) &&
+                m.product_id === p.product_id
             );
 
             if (!existsInMovements) {
+                const purchaseProduct = safeProducts.find(prod => prod.id === p.product_id);
                 const price = p.cost || 0;
                 const subtotal = price * p.quantity;
                 const iva = subtotal * IVA_RATE;
@@ -63,15 +80,16 @@ const Reports = () => {
                     source: 'purchase',
                     date: p.date,
                     type: 'Entrada',
-                    sku: p.productSku || '-',
-                    productName: p.productName || '-',
+                    sku: p.product_sku || p.productSku || '-',
+                    productName: p.product_name || p.productName || '-',
+                    location: purchaseProduct?.location || '-',
                     quantity: p.quantity,
                     unitPrice: price,
                     subtotal: subtotal,
                     iva: iva,
                     total: subtotal + iva,
-                    provider: p.providerName || '-',
-                    reason: `Compra - Factura: ${p.invoiceNumber}`,
+                    provider: p.provider_name || p.providerName || '-',
+                    reason: `Compra - Factura: ${p.invoice_number || p.invoiceNumber}`,
                     user: 'Sistema',
                     status: 'approved'
                 });
@@ -79,14 +97,15 @@ const Reports = () => {
         });
 
         // Process sales (if not already in movements)
-        sales.forEach(s => {
-            const existsInMovements = movements.some(m =>
+        safeSales.forEach(s => {
+            const existsInMovements = safeMovements.some(m =>
                 m.reason?.includes('Venta') &&
-                m.productId === s.productId &&
-                m.date?.startsWith(s.createdAt?.split('T')[0])
+                m.product_id === (s.product_id || s.productId) &&
+                m.date?.startsWith((s.created_at || s.createdAt)?.split('T')[0])
             );
 
             if (!existsInMovements) {
+                const saleProduct = safeProducts.find(prod => prod.id === (s.product_id || s.productId));
                 const price = s.priceUSD || s.price || 0;
                 const subtotal = price * s.quantity;
                 const iva = subtotal * IVA_RATE;
@@ -94,10 +113,11 @@ const Reports = () => {
                 records.push({
                     id: s.id,
                     source: 'sale',
-                    date: s.createdAt,
+                    date: s.created_at || s.createdAt,
                     type: 'Salida',
                     sku: s.sku || '-',
                     productName: s.description || '-',
+                    location: saleProduct?.location || '-',
                     quantity: s.quantity,
                     unitPrice: price,
                     subtotal: subtotal,
@@ -105,11 +125,13 @@ const Reports = () => {
                     total: subtotal + iva,
                     provider: '-',
                     reason: 'Venta/Egreso',
-                    user: s.userName || 'Sistema',
+                    user: s.user_name || s.userName || 'Sistema',
                     status: 'approved'
                 });
             }
         });
+
+        console.log('📊 Reports - Registros generados:', records.length);
 
         // Sort by date descending
         return records.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -343,6 +365,7 @@ const Reports = () => {
                             <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Tipo</th>
                             <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>SKU</th>
                             <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Producto</th>
+                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Ubicacion</th>
                             <th style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Cant.</th>
                             <th style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Precio U.</th>
                             <th style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Subtotal</th>
@@ -376,6 +399,7 @@ const Reports = () => {
                                         <td style={{ padding: '0.75rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {r.productName}
                                         </td>
+                                        <td style={{ padding: '0.75rem', fontSize: '0.8rem' }}>{r.location}</td>
                                         <td style={{ padding: '0.75rem', textAlign: 'center', fontWeight: 'bold' }}>{r.quantity}</td>
                                         <td style={{ padding: '0.75rem', textAlign: 'right' }}>${r.unitPrice.toFixed(2)}</td>
                                         <td style={{ padding: '0.75rem', textAlign: 'right' }}>${r.subtotal.toFixed(2)}</td>
@@ -394,7 +418,7 @@ const Reports = () => {
                             })
                         ) : (
                             <tr>
-                                <td colSpan="11" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                <td colSpan="12" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                                     No se encontraron registros con los filtros aplicados.
                                 </td>
                             </tr>

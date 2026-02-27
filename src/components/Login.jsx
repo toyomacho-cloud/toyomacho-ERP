@@ -3,8 +3,9 @@ import { LogIn, UserPlus, Mail, Lock, User, AlertCircle } from 'lucide-react';
 import { useAuth, ROLES } from '../context/AuthContext';
 
 const Login = () => {
-    const { login, register, error } = useAuth();
+    const { login, register, resetPassword, error } = useAuth();
     const [isRegister, setIsRegister] = useState(false);
+    const [showForgotPassword, setShowForgotPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         email: '',
@@ -13,6 +14,8 @@ const Login = () => {
         confirmPassword: ''
     });
     const [localError, setLocalError] = useState('');
+    const [resetSuccess, setResetSuccess] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -45,6 +48,27 @@ const Login = () => {
             if (!result.success) {
                 setLocalError(result.error);
             }
+        }
+        setLoading(false);
+    };
+
+    const handleForgotPassword = async (e) => {
+        e.preventDefault();
+        setLocalError('');
+        setResetSuccess(false);
+        setLoading(true);
+
+        if (!resetEmail || !resetEmail.trim()) {
+            setLocalError('Ingresa tu correo electronico');
+            setLoading(false);
+            return;
+        }
+
+        const result = await resetPassword(resetEmail.trim());
+        if (result.success) {
+            setResetSuccess(true);
+        } else {
+            setLocalError(result.error);
         }
         setLoading(false);
     };
@@ -231,6 +255,99 @@ const Login = () => {
                         {loading ? 'Cargando...' : (isRegister ? 'Crear Cuenta' : 'Iniciar Sesión')}
                     </button>
                 </form>
+
+                {/* Forgot Password Link (only on login tab) */}
+                {!isRegister && !showForgotPassword && (
+                    <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+                        <button
+                            onClick={() => {
+                                setShowForgotPassword(true);
+                                setLocalError('');
+                                setResetSuccess(false);
+                                setResetEmail(formData.email || '');
+                            }}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--accent-primary)',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                                textDecoration: 'underline',
+                                fontWeight: 500
+                            }}
+                        >
+                            Olvide mi contrasena
+                        </button>
+                    </div>
+                )}
+
+                {/* Forgot Password Form */}
+                {showForgotPassword && (
+                    <div style={{
+                        marginTop: '1.5rem',
+                        padding: '1.5rem',
+                        background: 'rgba(14, 165, 233, 0.05)',
+                        border: '1px solid rgba(14, 165, 233, 0.2)',
+                        borderRadius: 'var(--radius-md)'
+                    }}>
+                        <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>
+                            Recuperar Contrasena
+                        </h3>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                            Ingresa tu correo electronico y te enviaremos un enlace para restablecer tu contrasena.
+                        </p>
+
+                        {resetSuccess && (
+                            <div style={{
+                                padding: '0.75rem 1rem',
+                                background: 'rgba(16, 185, 129, 0.1)',
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                                borderRadius: 'var(--radius-md)',
+                                marginBottom: '1rem',
+                                color: '#059669',
+                                fontSize: '0.85rem'
+                            }}>
+                                Enlace de recuperacion enviado. Revisa tu bandeja de entrada.
+                            </div>
+                        )}
+
+                        <form onSubmit={handleForgotPassword}>
+                            <div style={{ position: 'relative', marginBottom: '1rem' }}>
+                                <Mail size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                                <input
+                                    type="email"
+                                    required
+                                    value={resetEmail}
+                                    onChange={(e) => setResetEmail(e.target.value)}
+                                    placeholder="correo@ejemplo.com"
+                                    style={{ paddingLeft: '3rem' }}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                <button
+                                    type="submit"
+                                    className="btn btn-primary"
+                                    disabled={loading}
+                                    style={{ flex: 1, padding: '0.75rem' }}
+                                >
+                                    {loading ? 'Enviando...' : 'Enviar Enlace'}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                        setShowForgotPassword(false);
+                                        setLocalError('');
+                                        setResetSuccess(false);
+                                    }}
+                                    style={{ padding: '0.75rem' }}
+                                >
+                                    Volver
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                )}
 
                 {isRegister && (
                     <p style={{

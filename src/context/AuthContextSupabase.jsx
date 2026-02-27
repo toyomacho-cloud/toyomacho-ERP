@@ -5,7 +5,9 @@ import {
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     signOut,
-    onAuthStateChanged
+    onAuthStateChanged,
+    sendPasswordResetEmail,
+    updatePassword
 } from '../firebase';
 
 const AuthContext = createContext();
@@ -38,6 +40,7 @@ export const AVAILABLE_MODULES = {
     mail: { id: 'mail', label: 'NovaMail', icon: 'Mail' },
     reports: { id: 'reports', label: 'Reportes', icon: 'FileSpreadsheet' },
     article177: { id: 'article177', label: 'Art. 177 ISLR', icon: 'Scale' },
+    transfers: { id: 'transfers', label: 'Traslados', icon: 'Truck' },
     settings: { id: 'settings', label: 'Configuración', icon: 'Settings' }
 };
 
@@ -54,6 +57,7 @@ export const DEFAULT_MODULES = {
     mail: false,
     reports: false,
     article177: false,
+    transfers: false,
     settings: false
 };
 
@@ -271,6 +275,43 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    // Reset password (send email)
+    const resetPassword = async (email) => {
+        try {
+            setError(null);
+            await sendPasswordResetEmail(auth, email);
+            return { success: true };
+        } catch (err) {
+            let msg = err.message;
+            if (msg.includes('auth/user-not-found')) msg = 'No existe una cuenta con ese correo.';
+            if (msg.includes('auth/invalid-email')) msg = 'Correo electronico invalido.';
+            setError(msg);
+            return { success: false, error: msg };
+        }
+    };
+
+    // Change password (logged-in user)
+    const changePassword = async (newPassword) => {
+        try {
+            setError(null);
+            if (!auth.currentUser) {
+                throw new Error('No hay usuario autenticado.');
+            }
+            await updatePassword(auth.currentUser, newPassword);
+            return { success: true };
+        } catch (err) {
+            let msg = err.message;
+            if (msg.includes('auth/requires-recent-login')) {
+                msg = 'Por seguridad, debes cerrar sesion y volver a iniciar sesion antes de cambiar la contrasena.';
+            }
+            if (msg.includes('auth/weak-password')) {
+                msg = 'La contrasena debe tener al menos 6 caracteres.';
+            }
+            setError(msg);
+            return { success: false, error: msg };
+        }
+    };
+
     // Get all users (admin only)
     const fetchUsers = async () => {
         try {
@@ -384,6 +425,8 @@ export const AuthProvider = ({ children }) => {
         register,
         login,
         logout,
+        resetPassword,
+        changePassword,
         fetchUsers,
         updateUserRole,
         toggleUserActive,

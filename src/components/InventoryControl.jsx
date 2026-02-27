@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { ClipboardList, History, ArrowUpRight, ArrowDownRight, RefreshCw, Check, X, Clock, Plus, Settings, Edit2, Trash2 } from 'lucide-react';
+import { ClipboardList, History, ArrowUpRight, ArrowDownRight, RefreshCw, Check, X, Clock, Plus, Settings, Edit2, Trash2, Truck } from 'lucide-react';
 import { useInventoryContext } from '../context/InventoryContext';
 import { useAuth } from '../context/AuthContext';
 import MovementForm from './MovementForm';
 import ProductForm from './ProductForm';
 
 const InventoryControl = () => {
-    const { movements, products, approveMovement, rejectMovement, categories = [], updateCategory, deleteCategory } = useInventoryContext();
+    const { movements, products, brands = [], categories = [], approveMovement, rejectMovement, updateCategory, deleteCategory, addProduct, updateProduct, addBrand, addCategory } = useInventoryContext();
     const { isAdmin } = useAuth();
 
     // Create a map for quick product lookup by id
@@ -20,11 +20,31 @@ const InventoryControl = () => {
     const getProductInfo = (movement) => {
         const product = productMap.get(movement.product_id || movement.productId);
         return {
-            name: movement.productName || product?.description || 'Producto no encontrado',
+            name: movement.product_name || movement.productName || product?.description || 'Producto no encontrado',
             location: movement.location || product?.location || '-',
-            sku: movement.sku || product?.sku || product?.reference || '-'
+            sku: movement.sku || product?.sku || '-',
+            reference: product?.reference || movement.sku || '-'
         };
     };
+
+    // Helper to get resulting stock from movement
+    const getResultingStock = (movement) => {
+        // Si el movimiento tiene new_qty, usarlo
+        if (movement.new_qty != null || movement.newQty != null) {
+            return movement.new_qty ?? movement.newQty;
+        }
+
+        // Si no, buscar el producto actual
+        const product = productMap.get(movement.product_id || movement.productId);
+        if (!product) return '-';
+
+        // Solo para movimientos aprobados mostramos el stock actual del producto
+        if (movement.status !== 'approved') return '-';
+
+        // Retornar el stock actual del producto (ya refleja todos los movimientos aprobados)
+        return product.quantity ?? 0;
+    };
+
     const [filterType, setFilterType] = useState('All');
     const [showProductModal, setShowProductModal] = useState(false);
 
@@ -68,13 +88,16 @@ const InventoryControl = () => {
 
     const filteredMovements = filterType === 'All'
         ? movements
-        : movements.filter(m => m.type === filterType);
+        : filterType === 'Traslado'
+            ? movements.filter(m => (m.reason || '').includes('TRASLADO_SALIDA'))
+            : movements.filter(m => m.type === filterType);
 
     const getTypeIcon = (type) => {
         switch (type) {
             case 'Entrada': return <ArrowUpRight size={16} color="var(--success)" />;
             case 'Salida': return <ArrowDownRight size={16} color="var(--danger)" />;
             case 'Ajuste': return <RefreshCw size={16} color="var(--warning)" />;
+            case 'Traslado': return <Truck size={16} color="var(--accent-primary)" />;
             default: return null;
         }
     };
@@ -174,6 +197,7 @@ const InventoryControl = () => {
                         <option value="Entrada">Entradas</option>
                         <option value="Salida">Salidas</option>
                         <option value="Ajuste">Ajustes</option>
+                        <option value="Traslado">Traslados</option>
                     </select>
                 </div>
 
@@ -184,6 +208,7 @@ const InventoryControl = () => {
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '140px' }}>Fecha</th>
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '100px' }}>Tipo</th>
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '100px' }}>SKU</th>
+                                <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '100px' }}>Ref</th>
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>Producto</th>
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '80px', textAlign: 'center' }}>Cant.</th>
                                 <th style={{ padding: '0.75rem', color: 'var(--text-secondary)', width: '80px', textAlign: 'center' }}>Stock</th>
@@ -208,11 +233,12 @@ const InventoryControl = () => {
                                                 </div>
                                             </td>
                                             <td style={{ padding: '0.75rem', fontFamily: 'monospace' }}>{productInfo.sku}</td>
+                                            <td style={{ padding: '0.75rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{productInfo.reference}</td>
                                             <td style={{ padding: '0.75rem', fontWeight: 500 }}>{productInfo.name}</td>
                                             <td style={{ padding: '0.75rem', fontWeight: 'bold', textAlign: 'center' }}>
                                                 {m.type === 'Salida' ? '-' : m.type === 'Entrada' ? '+' : ''}{m.quantity}
                                             </td>
-                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>{m.new_qty ?? m.newQty ?? '-'}</td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center' }}>{getResultingStock(m)}</td>
                                             <td style={{ padding: '0.75rem' }}>{productInfo.location}</td>
                                             <td style={{ padding: '0.75rem' }}>
                                                 <span style={{
@@ -260,7 +286,7 @@ const InventoryControl = () => {
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan="8" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                                    <td colSpan="11" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                                         No hay movimientos registrados.
                                     </td>
                                 </tr>
@@ -274,6 +300,13 @@ const InventoryControl = () => {
                 isOpen={showProductModal}
                 onClose={() => setShowProductModal(false)}
                 editProduct={null}
+                products={products}
+                brands={brands}
+                categories={categories}
+                addProduct={addProduct}
+                updateProduct={updateProduct}
+                addBrand={addBrand}
+                addCategory={addCategory}
             />
 
             {/* Category Manager Modal */}

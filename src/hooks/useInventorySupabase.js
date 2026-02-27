@@ -35,7 +35,7 @@ export const useInventory = (companyId) => {
     const [authRequests, setAuthRequests] = useState([]);
     const [creditNotes, setCreditNotes] = useState([]);
 
-    // Fetch all data for company
+    // Fetch all data for company (OPTIMIZED - Parallel + Limited)
     const fetchData = useCallback(async () => {
         if (!companyId) {
             setProducts([]);
@@ -49,180 +49,179 @@ export const useInventory = (companyId) => {
         }
 
         setLoading(true);
+        const startTime = Date.now();
+        console.log('🚀 Starting optimized parallel data fetch...');
 
         try {
-            // Fetch ALL products (parallel batches for speed)
-            console.log('📦 Loading products in parallel batches...');
-            const startTime = Date.now();
+            // ========== FASE 1: CARGA PARALELA ESENCIAL ==========
+            // Cargar productos, sesion de caja y datos basicos en paralelo
 
-            // First, get total count
-            const { count: totalCount } = await supabase
-                .from(TABLES.PRODUCTS)
-                .select('*', { count: 'exact', head: true })
-                .eq('company_id', companyId);
+            const [
+                productsResult,
+                brandsResult,
+                categoriesResult,
+                providersResult,
+                cashSessionResult,
+                customersResult
+            ] = await Promise.all([
+                // Products (batched if needed)
+                (async () => {
+                    const { count: totalCount } = await supabase
+                        .from(TABLES.PRODUCTS)
+                        .select('*', { count: 'exact', head: true })
+                        .eq('company_id', companyId)
+                        .or('status.is.null,status.neq.deleted'); // Incluir NULL y excluir deleted
 
-            if (!totalCount || totalCount === 0) {
-                console.log('⚠️ No products found');
-                setProducts([]);
-            } else {
-                // Calculate number of batches needed
-                const batchSize = 1000;
-                const numBatches = Math.ceil(totalCount / batchSize);
+                    if (!totalCount || totalCount === 0) return [];
 
-                // Create array of promises for parallel fetching
-                const batchPromises = [];
-                for (let i = 0; i < numBatches; i++) {
-                    const from = i * batchSize;
-                    const to = from + batchSize - 1;
+                    const batchSize = 1000;
+                    const numBatches = Math.ceil(totalCount / batchSize);
+                    const batchPromises = [];
 
-                    batchPromises.push(
-                        supabase
-                            .from(TABLES.PRODUCTS)
-                            .select('*')
-                            .eq('company_id', companyId)
-                            .order('description')
-                            .range(from, to)
-                    );
-                }
+                    for (let i = 0; i < numBatches; i++) {
+                        const from = i * batchSize;
+                        const to = from + batchSize - 1;
+                        batchPromises.push(
+                            supabase
+                                .from(TABLES.PRODUCTS)
+                                .select('*')
+                                .eq('company_id', companyId)
+                                .or('status.is.null,status.neq.deleted') // Incluir NULL y excluir deleted
+                                .order('description')
+                                .range(from, to)
+                        );
+                    }
 
-                // Fetch all batches in parallel
-                const results = await Promise.all(batchPromises);
+                    const results = await Promise.all(batchPromises);
+                    return results.flatMap(r => r.data || []);
+                })(),
 
-                // Combine all results
-                const allProducts = results.flatMap(result => result.data || []);
+                // Brands (global, fast)
+                supabase.from(TABLES.BRANDS).select('*'),
 
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-                console.log(`✅ Loaded ${allProducts.length} products in ${elapsed}s (${numBatches} parallel batches)`);
+                // Categories (global, fast)
+                supabase.from(TABLES.CATEGORIES).select('*'),
 
-                setProducts(allProducts);
-            }
+                // Providers
+                supabase.from(TABLES.PROVIDERS).select('*').eq('company_id', companyId),
 
-            // Fetch movements
-            const { data: movementsData } = await supabase
-                .from(TABLES.MOVEMENTS)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('date', { ascending: false });
-            setMovements(movementsData || []);
+                // Cash Session (single record)
+                supabase
+                    .from(TABLES.CASH_SESSIONS)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .in('status', ['open', 'pending_verification'])
+                    .limit(1)
+                    .maybeSingle(),
 
-            // Fetch purchases
-            const { data: purchasesData } = await supabase
-                .from(TABLES.PURCHASES)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('date', { ascending: false });
-            setPurchases(purchasesData || []);
+                // Customers
+                supabase
+                    .from(TABLES.CUSTOMERS)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('name')
+            ]);
 
-            // Fetch providers
-            const { data: providersData } = await supabase
-                .from(TABLES.PROVIDERS)
-                .select('*')
-                .eq('company_id', companyId);
-            setProviders(providersData || []);
+            // Set essential data immediately
+            setProducts(productsResult || []);
+            setBrands(brandsResult.data || []);
+            setCategories(categoriesResult.data || []);
+            setProviders(providersResult.data || []);
+            setCashSession(cashSessionResult.data || null);
+            setCustomers(customersResult.data || []);
 
-            // Fetch brands (GLOBAL)
-            const { data: brandsData } = await supabase
-                .from(TABLES.BRANDS)
-                .select('*');
-            setBrands(brandsData || []);
+            const phase1Time = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`✅ Phase 1 complete: ${productsResult.length} products loaded in ${phase1Time}s`);
 
-            // Fetch categories (GLOBAL)
-            const { data: categoriesData } = await supabase
-                .from(TABLES.CATEGORIES)
-                .select('*');
-            setCategories(categoriesData || []);
+            // ========== FASE 2: CARGA SECUNDARIA (puede ser mas lenta) ==========
+            // Movimientos, ventas, compras - LIMITADOS a ultimos 500 registros
 
-            // Fetch sales (flat structure)
-            const { data: rawSalesData, error: salesError } = await supabase
-                .from(TABLES.SALES)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('created_at', { ascending: false });
+            const LIMIT_RECORDS = 500;
 
-            if (salesError) throw salesError;
+            const [
+                movementsResult,
+                salesResult,
+                purchasesResult,
+                cashTxResult,
+                authRequestsResult,
+                creditNotesResult
+            ] = await Promise.all([
+                // Movements (limited to recent)
+                supabase
+                    .from(TABLES.MOVEMENTS)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('date', { ascending: false })
+                    .limit(LIMIT_RECORDS),
 
-            // Manual Join: Fetch product details for these sales
-            // 1. Get unique product IDs
-            const productIds = [...new Set(rawSalesData?.map(s => s.product_id).filter(Boolean))];
+                // Sales (limited to recent, no manual join - use description from sale)
+                supabase
+                    .from(TABLES.SALES)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('created_at', { ascending: false })
+                    .limit(LIMIT_RECORDS),
 
-            // 2. Fetch products
-            let productsMap = {};
-            if (productIds.length > 0) {
-                const { data: productsData } = await supabase
-                    .from(TABLES.PRODUCTS)
-                    .select('id, description, sku, reference')
-                    .in('id', productIds);
+                // Purchases (limited)
+                supabase
+                    .from(TABLES.PURCHASES)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('date', { ascending: false })
+                    .limit(LIMIT_RECORDS),
 
-                // Create lookup map
-                productsData?.forEach(p => {
-                    productsMap[p.id] = p;
-                });
-            }
+                // Cash Transactions (limited)
+                supabase
+                    .from(TABLES.CASH_TRANSACTIONS)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('created_at', { ascending: false })
+                    .limit(LIMIT_RECORDS),
 
-            // 3. Transform and enrich data
-            const salesData = rawSalesData?.map(sale => {
-                const product = productsMap[sale.product_id] || {};
-                return {
-                    ...sale,
-                    sale_items: [{
-                        id: sale.id,
-                        product_id: sale.product_id,
-                        quantity: sale.quantity,
-                        price_usd: sale.amount_usd,
-                        price_bs: sale.amount_bs,
-                        product: {
-                            id: sale.product_id,
-                            description: product.description || sale.description || 'Producto',
-                            sku: product.sku || sale.sku || 'N/A',
-                            reference: product.reference || sale.reference || 'N/A'
-                        }
-                    }]
-                };
-            }) || [];
+                // Auth Requests (only pending)
+                supabase
+                    .from(TABLES.AUTH_REQUESTS)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .eq('status', 'pending'),
 
+                // Credit Notes (limited)
+                supabase
+                    .from(TABLES.CREDIT_NOTES)
+                    .select('*')
+                    .eq('company_id', companyId)
+                    .order('created_at', { ascending: false })
+                    .limit(100)
+            ]);
+
+            setMovements(movementsResult.data || []);
+
+            // Enrich sales with sale_items structure (using embedded data, no extra query)
+            const salesData = (salesResult.data || []).map(sale => ({
+                ...sale,
+                sale_items: [{
+                    id: sale.id,
+                    product_id: sale.product_id,
+                    quantity: sale.quantity,
+                    price_usd: sale.amount_usd,
+                    price_bs: sale.amount_bs,
+                    product: {
+                        id: sale.product_id,
+                        description: sale.description || 'Producto',
+                        sku: sale.sku || 'N/A',
+                        reference: sale.reference || 'N/A'
+                    }
+                }]
+            }));
             setSales(salesData);
 
-            // Fetch customers
-            const { data: customersData } = await supabase
-                .from(TABLES.CUSTOMERS)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('name');
-            setCustomers(customersData || []);
+            setPurchases(purchasesResult.data || []);
+            setCashTransactions(cashTxResult.data || []);
+            setAuthRequests(authRequestsResult.data || []);
+            setCreditNotes(creditNotesResult.data || []);
 
-            // Fetch cash session (open one)
-            const { data: sessionData } = await supabase
-                .from(TABLES.CASH_SESSIONS)
-                .select('*')
-                .eq('company_id', companyId)
-                .in('status', ['open', 'pending_verification'])
-                .limit(1)
-                .single();
-            setCashSession(sessionData || null);
-
-            // Fetch cash transactions
-            const { data: txData } = await supabase
-                .from(TABLES.CASH_TRANSACTIONS)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('created_at', { ascending: false });
-            setCashTransactions(txData || []);
-
-            // Fetch auth requests
-            const { data: authData } = await supabase
-                .from(TABLES.AUTH_REQUESTS)
-                .select('*')
-                .eq('company_id', companyId)
-                .eq('status', 'pending');
-            setAuthRequests(authData || []);
-
-            // Fetch credit notes
-            const { data: cnData } = await supabase
-                .from(TABLES.CREDIT_NOTES)
-                .select('*')
-                .eq('company_id', companyId)
-                .order('created_at', { ascending: false });
-            setCreditNotes(cnData || []);
+            const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`🏁 All data loaded in ${totalTime}s (Products: ${productsResult.length}, Sales: ${salesData.length}, Movements: ${movementsResult.data?.length || 0})`);
 
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -236,36 +235,173 @@ export const useInventory = (companyId) => {
         fetchData();
     }, [fetchData]);
 
-    // Set up real-time subscriptions
+    // ========== REAL-TIME HANDLERS (OPTIMIZED) ==========
+    // En lugar de recargar TODO, actualizamos solo el registro cambiado
+
+    const handleProductChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        // Solo procesar si es de nuestra company
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        console.log(`🔄 Product ${eventType}:`, newRecord?.description || oldRecord?.id);
+
+        if (eventType === 'INSERT') {
+            setProducts(prev => [...prev, newRecord]);
+        } else if (eventType === 'UPDATE') {
+            setProducts(prev => prev.map(p => p.id === newRecord.id ? newRecord : p));
+        } else if (eventType === 'DELETE') {
+            setProducts(prev => prev.filter(p => p.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    const handleSaleChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        console.log(`🔄 Sale ${eventType}:`, newRecord?.document_number || oldRecord?.id);
+
+        if (eventType === 'INSERT') {
+            // Enriquecer con estructura esperada
+            const enrichedSale = {
+                ...newRecord,
+                sale_items: [{
+                    id: newRecord.id,
+                    product_id: newRecord.product_id,
+                    quantity: newRecord.quantity,
+                    price_usd: newRecord.amount_usd,
+                    price_bs: newRecord.amount_bs,
+                    product: { id: newRecord.product_id, description: newRecord.description, sku: newRecord.sku }
+                }]
+            };
+            setSales(prev => [enrichedSale, ...prev]);
+        } else if (eventType === 'UPDATE') {
+            setSales(prev => prev.map(s => s.id === newRecord.id ? { ...s, ...newRecord } : s));
+        } else if (eventType === 'DELETE') {
+            setSales(prev => prev.filter(s => s.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    const handleMovementChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        console.log(`🔄 Movement ${eventType}`);
+
+        if (eventType === 'INSERT') {
+            setMovements(prev => [newRecord, ...prev]);
+        } else if (eventType === 'UPDATE') {
+            setMovements(prev => prev.map(m => m.id === newRecord.id ? newRecord : m));
+        } else if (eventType === 'DELETE') {
+            setMovements(prev => prev.filter(m => m.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    const handlePurchaseChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        console.log(`🔄 Purchase ${eventType}`);
+
+        if (eventType === 'INSERT') {
+            setPurchases(prev => [newRecord, ...prev]);
+        } else if (eventType === 'UPDATE') {
+            setPurchases(prev => prev.map(p => p.id === newRecord.id ? newRecord : p));
+        } else if (eventType === 'DELETE') {
+            setPurchases(prev => prev.filter(p => p.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    const handleCustomerChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        if (eventType === 'INSERT') {
+            setCustomers(prev => [...prev, newRecord].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+        } else if (eventType === 'UPDATE') {
+            setCustomers(prev => prev.map(c => c.id === newRecord.id ? newRecord : c));
+        } else if (eventType === 'DELETE') {
+            setCustomers(prev => prev.filter(c => c.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    const handleCashSessionChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        // Solo nos interesa la sesion abierta
+        if (newRecord?.status === 'open' || newRecord?.status === 'pending_verification') {
+            setCashSession(newRecord);
+        } else if (oldRecord?.id === cashSession?.id) {
+            setCashSession(null);
+        }
+    }, [companyId, cashSession?.id]);
+
+    const handleCashTransactionChange = useCallback((payload) => {
+        const { eventType, new: newRecord, old: oldRecord } = payload;
+        if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
+
+        if (eventType === 'INSERT') {
+            setCashTransactions(prev => [newRecord, ...prev]);
+        } else if (eventType === 'UPDATE') {
+            setCashTransactions(prev => prev.map(t => t.id === newRecord.id ? newRecord : t));
+        } else if (eventType === 'DELETE') {
+            setCashTransactions(prev => prev.filter(t => t.id !== oldRecord.id));
+        }
+    }, [companyId]);
+
+    // Set up real-time subscriptions (OPTIMIZED - Granular Updates)
     useEffect(() => {
         if (!companyId) return;
 
+        console.log('📡 Setting up granular real-time subscriptions...');
+
         const channel = supabase
-            .channel(`company_${companyId}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PRODUCTS }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.SALES }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MOVEMENTS }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PURCHASES }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CUSTOMERS }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_SESSIONS }, fetchData)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_TRANSACTIONS }, fetchData)
-            .subscribe();
+            .channel(`company_${companyId}_optimized`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PRODUCTS }, handleProductChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.SALES }, handleSaleChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MOVEMENTS }, handleMovementChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PURCHASES }, handlePurchaseChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CUSTOMERS }, handleCustomerChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_SESSIONS }, handleCashSessionChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_TRANSACTIONS }, handleCashTransactionChange)
+            .subscribe((status) => {
+                console.log('📡 Realtime subscription status:', status);
+            });
 
         return () => {
+            console.log('📡 Removing real-time channel');
             supabase.removeChannel(channel);
         };
-    }, [companyId, fetchData]);
+    }, [companyId, handleProductChange, handleSaleChange, handleMovementChange, handlePurchaseChange, handleCustomerChange, handleCashSessionChange, handleCashTransactionChange]);
 
     // ========== PRODUCTS ==========
     const addProduct = async (productData) => {
         try {
             if (!companyId) throw new Error('Company ID is missing (addProduct)');
 
+            // SKU UNIQUE VALIDATION - Check before insert
+            if (productData.sku && productData.sku.trim() !== '') {
+                const { data: existingSku } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('id, sku')
+                    .eq('company_id', companyId)
+                    .ilike('sku', productData.sku.trim())
+                    .maybeSingle();
+
+                if (existingSku) {
+                    throw new Error(`El SKU "${productData.sku}" ya existe. Use otro codigo.`);
+                }
+            }
+
+            // Extract minStock from productData to avoid sending camelCase to DB
+            const { minStock, ...restProductData } = productData;
+
             const { data, error } = await supabase
                 .from(TABLES.PRODUCTS)
                 .insert({
-                    ...productData,
-                    min_stock: productData.minStock !== undefined ? productData.minStock : productData.min_stock,
+                    ...restProductData,
+                    status: restProductData.status || 'active',
+                    min_stock: minStock !== undefined ? minStock : restProductData.min_stock,
                     company_id: companyId,
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
@@ -274,6 +410,34 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (error) throw error;
+
+            // Auto-register initial movement if product has stock
+            const initialQty = parseFloat(data.quantity) || 0;
+            if (initialQty > 0 && data.id) {
+                try {
+                    await supabase
+                        .from(TABLES.MOVEMENTS)
+                        .insert({
+                            company_id: companyId,
+                            product_id: data.id,
+                            sku: data.sku || '',
+                            product_name: data.description || '',
+                            type: 'Entrada',
+                            quantity: initialQty,
+                            new_qty: initialQty,
+                            location: data.location || '',
+                            reason: 'Creacion del producto',
+                            status: 'approved',
+                            user_name: 'Sistema',
+                            date: new Date().toISOString(),
+                            created_at: new Date().toISOString(),
+                            approved_at: new Date().toISOString()
+                        });
+                } catch (movError) {
+                    console.warn('Could not create initial movement for product:', movError);
+                }
+            }
+
             await fetchData();
             return data;
         } catch (error) {
@@ -287,24 +451,38 @@ export const useInventory = (companyId) => {
             if (!companyId) throw new Error('Company ID is missing');
 
             const { minStock, ...restUpdates } = updates;
+            // Eliminar propiedades temporales del frontend (ej: _relevance del filtro de busqueda)
+            const cleanUpdates = Object.fromEntries(
+                Object.entries(restUpdates).filter(([key]) => !key.startsWith('_'))
+            );
             const dbUpdates = {
-                ...restUpdates,
-                min_stock: minStock !== undefined ? minStock : restUpdates.min_stock,
+                ...cleanUpdates,
+                min_stock: minStock !== undefined ? minStock : cleanUpdates.min_stock,
                 updated_at: new Date().toISOString()
             };
+            console.log(`📝 updateProduct: id=${id}, updates=`, dbUpdates);
 
-            const { error } = await supabase
+            const { data: updatedProduct, error } = await supabase
                 .from(TABLES.PRODUCTS)
                 .update(dbUpdates)
                 .eq('id', id)
-                .eq('company_id', companyId);
+                .eq('company_id', companyId)
+                .select()
+                .single();
 
             if (error) {
                 console.error('❌ updateProduct error:', error);
                 throw error;
             }
-            console.log('✅ Product updated successfully');
+
+            if (!updatedProduct) {
+                console.error('❌ updateProduct: No se actualizo ningun producto. Verificar ID y company_id');
+                throw new Error('No se pudo actualizar el producto');
+            }
+
+            console.log('✅ Product updated successfully:', updatedProduct.description, 'quantity:', updatedProduct.quantity);
             await fetchData();
+            return updatedProduct;
         } catch (error) {
             console.error('Error updating product:', error);
             throw error;
@@ -315,15 +493,67 @@ export const useInventory = (companyId) => {
 
     const deleteProduct = async (id) => {
         try {
+            if (!companyId) throw new Error('Company ID is missing (deleteProduct)');
+
+            console.log(`🗑️ Soft-deleting product: id=${id}, company_id=${companyId}`);
+
+            // Use UPDATE instead of DELETE to avoid RLS issues
+            // Mark as deleted rather than physically removing
             const { error } = await supabase
                 .from(TABLES.PRODUCTS)
-                .delete()
-                .eq('id', id);
+                .update({
+                    status: 'deleted',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .eq('company_id', companyId);
 
-            if (error) throw error;
-            await fetchData();
+            if (error) {
+                console.error('❌ Soft delete error:', error);
+                throw error;
+            }
+
+            // Remove from local state immediately
+            setProducts(prev => prev.filter(p => p.id !== id));
+            console.log('✅ Product soft-deleted successfully');
         } catch (error) {
             console.error('Error deleting product:', error);
+            alert(`Error al eliminar: ${error.message}`);
+            throw error;
+        }
+    };
+
+    // ========== BULK DELETE PRODUCTS ==========
+    const deleteProductsBatch = async (ids) => {
+        try {
+            if (!companyId) throw new Error('Company ID is missing (deleteProductsBatch)');
+            if (!ids || ids.length === 0) throw new Error('No products selected');
+
+            console.log(`🗑️ Bulk soft-deleting ${ids.length} products...`);
+
+            // Use UPDATE with .in() for efficient batch soft-delete
+            const { error } = await supabase
+                .from(TABLES.PRODUCTS)
+                .update({
+                    status: 'deleted',
+                    updated_at: new Date().toISOString()
+                })
+                .in('id', ids)
+                .eq('company_id', companyId);
+
+            if (error) {
+                console.error('❌ Bulk soft delete error:', error);
+                throw error;
+            }
+
+            // Remove from local state immediately
+            setProducts(prev => prev.filter(p => !ids.includes(p.id)));
+            console.log(`✅ ${ids.length} products soft-deleted successfully`);
+
+            return { deleted: ids.length };
+        } catch (error) {
+            console.error('Error bulk deleting products:', error);
+            alert(`Error al eliminar productos: ${error.message}`);
             throw error;
         }
     };
@@ -332,16 +562,51 @@ export const useInventory = (companyId) => {
         try {
             const productsToInsert = productsArray.map(p => ({
                 ...p,
+                status: p.status || 'active',
                 company_id: companyId,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }));
 
-            const { error } = await supabase
+            const { data: insertedProducts, error } = await supabase
                 .from(TABLES.PRODUCTS)
-                .insert(productsToInsert);
+                .insert(productsToInsert)
+                .select();
 
             if (error) throw error;
+
+            // Auto-register initial movements for products with stock
+            if (insertedProducts && insertedProducts.length > 0) {
+                const movementsToInsert = insertedProducts
+                    .filter(p => (parseFloat(p.quantity) || 0) > 0)
+                    .map(p => ({
+                        company_id: companyId,
+                        product_id: p.id,
+                        sku: p.sku || '',
+                        product_name: p.description || '',
+                        type: 'Entrada',
+                        quantity: parseFloat(p.quantity) || 0,
+                        new_qty: parseFloat(p.quantity) || 0,
+                        location: p.location || '',
+                        reason: 'Importacion Excel',
+                        status: 'approved',
+                        user_name: 'Sistema',
+                        date: new Date().toISOString(),
+                        created_at: new Date().toISOString(),
+                        approved_at: new Date().toISOString()
+                    }));
+
+                if (movementsToInsert.length > 0) {
+                    try {
+                        await supabase
+                            .from(TABLES.MOVEMENTS)
+                            .insert(movementsToInsert);
+                    } catch (movError) {
+                        console.warn('Could not create initial movements for batch:', movError);
+                    }
+                }
+            }
+
             await fetchData();
         } catch (error) {
             console.error('Error adding products batch:', error);
@@ -367,6 +632,27 @@ export const useInventory = (companyId) => {
             return data;
         } catch (error) {
             console.error('Error adding provider:', error);
+            throw error;
+        }
+    };
+
+    const updateProvider = async (id, updates) => {
+        try {
+            if (!companyId) throw new Error('Company ID is missing (updateProvider)');
+
+            const { data, error } = await supabase
+                .from(TABLES.PROVIDERS)
+                .update(updates)
+                .eq('id', id)
+                .eq('company_id', companyId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            await fetchData();
+            return data;
+        } catch (error) {
+            console.error('Error updating provider:', error);
             throw error;
         }
     };
@@ -448,11 +734,21 @@ export const useInventory = (companyId) => {
         try {
             const esPresupuesto = saleData.is_quote || saleData.document_type === 'presupuesto';
 
-            // 1. Create Sale
+            console.log('💾 addSale - datos recibidos:', {
+                product_id: saleData.product_id,
+                quantity: saleData.quantity,
+                is_quote: saleData.is_quote,
+                document_type: saleData.document_type,
+                esPresupuesto,
+                user_name: saleData.user_name
+            });
+
+            // 1. Create Sale (extract user_name as sales table doesn't have it)
+            const { user_name: saleUserName, ...saleInsertData } = saleData;
             const { data: sale, error: saleError } = await supabase
                 .from(TABLES.SALES)
                 .insert({
-                    ...saleData,
+                    ...saleInsertData,
                     company_id: companyId,
                     created_at: new Date().toISOString()
                 })
@@ -462,60 +758,42 @@ export const useInventory = (companyId) => {
             if (saleError) throw saleError;
 
             // 2. Descontar stock automaticamente (solo si NO es presupuesto)
-            if (!esPresupuesto && saleData.product_id && saleData.quantity) {
-                const productId = saleData.product_id;
-                const cantidadVendida = parseInt(saleData.quantity) || 0;
+            const productId = saleData.product_id;
+            const cantidadVendida = parseFloat(saleData.quantity) || 0;
 
-                // Buscar producto para obtener stock actual
-                let product = products.find(p => p.id === productId);
-                if (!product) {
-                    const { data: dbProduct } = await supabase
-                        .from(TABLES.PRODUCTS)
-                        .select('*')
-                        .eq('id', productId)
-                        .eq('company_id', companyId)
-                        .single();
-                    product = dbProduct;
+            if (!esPresupuesto && productId && cantidadVendida > 0) {
+                // Leer datos frescos del producto para sku/nombre
+                const { data: dbProduct } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('id, sku, reference, description')
+                    .eq('id', productId)
+                    .eq('company_id', companyId)
+                    .single();
+
+                if (dbProduct) {
+                    // addMovement lee stock fresco, calcula new_qty, inserta movimiento y actualiza product.quantity
+                    await addMovement({
+                        productId: dbProduct.id,
+                        sku: dbProduct.sku || dbProduct.reference || '',
+                        productName: dbProduct.description || '',
+                        type: 'Salida',
+                        quantity: cantidadVendida,
+                        reason: `Venta ${sale.document_number || '#' + sale.id}`,
+                        status: 'approved',
+                        createdBy: saleUserName || 'Usuario POS'
+                    });
+
+                    console.log(`✅ Movimiento de salida creado (via addMovement) para venta ${sale.document_number}`);
+                } else {
+                    console.warn(`⚠️ Producto ${productId} no encontrado en DB para descontar stock`);
                 }
-
-                if (product) {
-                    const stockActual = product.quantity || 0;
-                    const nuevoStock = Math.max(0, stockActual - cantidadVendida);
-
-                    console.log(`🛒 Venta: Descontando ${cantidadVendida} de ${product.description || product.sku}. Stock: ${stockActual} → ${nuevoStock}`);
-
-                    // 2a. Actualizar stock del producto
-                    await supabase
-                        .from(TABLES.PRODUCTS)
-                        .update({
-                            quantity: nuevoStock,
-                            updated_at: new Date().toISOString()
-                        })
-                        .eq('id', productId)
-                        .eq('company_id', companyId);
-
-                    // 2b. Crear movimiento de salida (auto-aprobado)
-                    await supabase
-                        .from(TABLES.MOVEMENTS)
-                        .insert({
-                            company_id: companyId,
-                            product_id: productId,
-                            sku: product.sku || product.reference || '',
-                            product_name: product.description || '',
-                            type: 'Salida',
-                            quantity: cantidadVendida,
-                            new_qty: nuevoStock,
-                            location: product.location || '',
-                            reason: `Venta ${sale.document_number || '#' + sale.id}`,
-                            status: 'approved',
-                            user_name: 'Sistema (Venta)',
-                            date: new Date().toISOString(),
-                            created_at: new Date().toISOString(),
-                            approved_at: new Date().toISOString()
-                        });
-
-                    console.log(`✅ Movimiento de salida creado para venta ${sale.document_number}`);
-                }
+            } else {
+                console.warn('⚠️ NO se desconto stock:', {
+                    esPresupuesto,
+                    productId: productId || 'MISSING',
+                    cantidadVendida,
+                    reason: esPresupuesto ? 'Es presupuesto' : !productId ? 'Sin product_id' : 'Cantidad 0'
+                });
             }
 
             // 3. Register Payments (if any)
@@ -546,6 +824,147 @@ export const useInventory = (companyId) => {
             return sale;
         } catch (error) {
             console.error('Error adding sale:', error);
+            throw error;
+        }
+    };
+
+    // ========== BATCH SALES (OPTIMIZED) ==========
+    const addSalesBatch = async (saleItems, paymentMethods = [], userName = 'Usuario POS') => {
+        try {
+            console.log(`🚀 addSalesBatch: Processing ${saleItems.length} items...`);
+            const startTime = Date.now();
+
+            // 1. Batch Insert ALL sales at once (remove user_name as sales table doesn't have it)
+            const salesToInsert = saleItems.map(({ user_name, ...item }) => ({
+                ...item,
+                company_id: companyId,
+                created_at: new Date().toISOString()
+            }));
+
+            const { data: insertedSales, error: salesError } = await supabase
+                .from(TABLES.SALES)
+                .insert(salesToInsert)
+                .select();
+
+            if (salesError) throw salesError;
+            console.log(`✅ Inserted ${insertedSales.length} sales in batch`);
+
+            // 2. Check if we need to update stock (not for quotes)
+            const esPresupuesto = saleItems[0]?.is_quote || saleItems[0]?.document_type === 'presupuesto';
+
+            if (!esPresupuesto) {
+                // 3. Leer stock fresco de la DB para TODOS los productos del batch
+                const uniqueProductIds = [...new Set(saleItems.filter(i => i.product_id).map(i => i.product_id))];
+                const { data: freshProducts } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('*')
+                    .in('id', uniqueProductIds)
+                    .eq('company_id', companyId);
+
+                const freshProductMap = new Map((freshProducts || []).map(p => [p.id, p]));
+                console.log(`📦 Stock fresco leido de DB para ${freshProductMap.size} productos`);
+
+                const stockUpdates = new Map(); // Acumular descuentos por producto
+                const movementsToInsert = [];
+
+                for (let i = 0; i < saleItems.length; i++) {
+                    const item = saleItems[i];
+                    const sale = insertedSales[i];
+
+                    if (item.product_id && item.quantity) {
+                        const productId = item.product_id;
+                        const cantidadVendida = parseInt(item.quantity) || 0;
+
+                        // Usar producto fresco de la DB
+                        const product = freshProductMap.get(productId);
+                        if (product) {
+                            // Usar stock acumulado si ya procesamos este producto, sino usar el fresco de DB
+                            const stockActual = stockUpdates.has(productId)
+                                ? stockUpdates.get(productId)
+                                : (product.quantity || 0);
+                            const nuevoStock = Math.max(0, stockActual - cantidadVendida);
+
+                            // Actualizar el mapa con el nuevo stock
+                            stockUpdates.set(productId, nuevoStock);
+
+                            movementsToInsert.push({
+                                company_id: companyId,
+                                product_id: productId,
+                                sku: product.sku || product.reference || '',
+                                product_name: product.description || '',
+                                type: 'Salida',
+                                quantity: cantidadVendida,
+                                new_qty: nuevoStock,
+                                location: product.location || '',
+                                reason: `Venta ${sale?.document_number || '#' + sale?.id}`,
+                                status: 'approved',
+                                user_name: userName,
+                                date: new Date().toISOString(),
+                                created_at: new Date().toISOString(),
+                                approved_at: new Date().toISOString()
+                            });
+                        }
+                    }
+                }
+
+                // 4. Execute stock updates in parallel (usar el Map)
+                if (stockUpdates.size > 0) {
+                    const updatePromises = Array.from(stockUpdates.entries()).map(([productId, nuevoStock]) =>
+                        supabase
+                            .from(TABLES.PRODUCTS)
+                            .update({
+                                quantity: nuevoStock,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', productId)
+                            .eq('company_id', companyId)
+                    );
+                    await Promise.all(updatePromises);
+                    console.log(`✅ Updated stock for ${stockUpdates.size} products in parallel`);
+                }
+
+                // 5. Batch insert movements
+                if (movementsToInsert.length > 0) {
+                    const { error: movError } = await supabase
+                        .from(TABLES.MOVEMENTS)
+                        .insert(movementsToInsert);
+                    if (movError) {
+                        console.error('❌ Movement insert error:', movError);
+                        throw new Error(`Error insertando movimientos de venta: ${movError.message}`);
+                    }
+                    console.log(`✅ Inserted ${movementsToInsert.length} movements in batch`);
+                }
+            }
+
+            // 6. Register Payments (only once for the entire batch)
+            if (paymentMethods && paymentMethods.length > 0 && cashSession) {
+                const firstSale = insertedSales[0];
+                const transactionPromises = paymentMethods.map(payment =>
+                    supabase.from('cash_transactions').insert({
+                        company_id: companyId,
+                        session_id: cashSession.id,
+                        type: 'sale',
+                        amount: payment.amount,
+                        currency: payment.currency,
+                        description: `Venta ${firstSale?.document_number} (${payment.method})`,
+                        reference: payment.reference || null,
+                        sale_id: firstSale?.id,
+                        created_at: new Date().toISOString()
+                    })
+                );
+                await Promise.all(transactionPromises);
+                console.log(`✅ Registered ${paymentMethods.length} payments`);
+            }
+
+            // 7. Single fetchData at the end
+            await fetchData();
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`🏁 addSalesBatch completed in ${elapsed}s`);
+
+            return insertedSales;
+        } catch (error) {
+            console.error('Error in addSalesBatch:', error);
             throw error;
         }
     };
@@ -589,21 +1008,29 @@ export const useInventory = (companyId) => {
 
             // Revert logic for Flat Structure (1 row per sale item approach used in `addSale` loop):
             if (sale.product_id && sale.quantity) {
-                const product = products.find(p => p.id === sale.product_id);
-                if (product) {
-                    const newQty = (product.quantity || 0) + sale.quantity;
-                    console.log(`↺ Reverting ${sale.quantity} of ${product.description}. New Qty: ${newQty}`);
+                // BUG-5 FIX: Leer stock FRESCO de la DB en vez de cache local
+                const { data: freshProduct } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .select('*')
+                    .eq('id', sale.product_id)
+                    .eq('company_id', companyId)
+                    .single();
 
-                    // Update Product
-                    await updateProduct(product.id, { quantity: newQty });
+                if (freshProduct) {
+                    const currentQty = freshProduct.quantity || 0;
+                    const revertedQty = currentQty + (parseFloat(sale.quantity) || 0);
+                    console.log(`↺ Reverting ${sale.quantity} of ${freshProduct.description}. Stock: ${currentQty} → ${revertedQty}`);
 
-                    // Log Movement
+                    // BUG-6 FIX: Solo registrar movimiento (sin updateProduct previo)
+                    // addMovement con status=approved ya actualiza el stock del producto
                     await addMovement({
-                        productId: product.id,
-                        type: 'entrada',
+                        productId: freshProduct.id,
+                        sku: freshProduct.sku || freshProduct.reference || '',
+                        productName: freshProduct.description || '',
+                        type: 'Entrada',
                         quantity: sale.quantity,
-                        reason: `Anulación Venta #${sale.document_number}`,
-                        status: 'approved', // Auto-approve
+                        reason: `Anulacion Venta #${sale.document_number}`,
+                        status: 'approved',
                         createdBy: 'Sistema'
                     });
                 }
@@ -646,30 +1073,23 @@ export const useInventory = (companyId) => {
                 throw new Error('productId es requerido para el movimiento');
             }
 
-            // Buscar producto en cache local primero
-            let product = products.find(p => p.id === productId);
+            // BUG-1 FIX: SIEMPRE leer stock fresco de la DB (nunca del cache)
+            const { data: product, error: fetchError } = await supabase
+                .from(TABLES.PRODUCTS)
+                .select('*')
+                .eq('id', productId)
+                .eq('company_id', companyId)
+                .single();
 
-            // Si no esta en cache, buscar en DB directamente
-            if (!product) {
-                console.log('⚠️ Producto no en cache, buscando en DB...');
-                const { data: dbProduct, error: fetchError } = await supabase
-                    .from(TABLES.PRODUCTS)
-                    .select('*')
-                    .eq('id', productId)
-                    .eq('company_id', companyId)
-                    .single();
-
-                if (fetchError) {
-                    console.error('❌ Error buscando producto:', fetchError);
-                } else {
-                    product = dbProduct;
-                }
+            if (fetchError) {
+                console.error('❌ Error buscando producto:', fetchError);
+                throw new Error('Producto no encontrado en la base de datos');
             }
 
-            console.log('📦 Found product:', product ? { id: product.id, quantity: product.quantity, description: product.description } : 'NOT FOUND');
+            console.log('📦 Found product (DB fresh):', product ? { id: product.id, quantity: product.quantity, description: product.description } : 'NOT FOUND');
 
             const currentQty = product?.quantity || 0;
-            const qty = parseInt(movementData.quantity) || 0;
+            const qty = parseFloat(movementData.quantity) || 0;
             const movementType = (movementData.type || '').toLowerCase();
             const status = movementData.status || 'pending';
 
@@ -678,12 +1098,18 @@ export const useInventory = (companyId) => {
             if (movementType === 'entrada') {
                 newQty = currentQty + qty;
             } else if (movementType === 'salida') {
+                // ========== VALIDACION STOCK INSUFICIENTE ==========
+                if (qty > currentQty) {
+                    const errorMsg = `Stock insuficiente para "${product?.description || 'producto'}". Disponible: ${currentQty}, Solicitado: ${qty}`;
+                    console.error('❌ ' + errorMsg);
+                    throw new Error(errorMsg);
+                }
                 newQty = currentQty - qty;
             } else if (movementType === 'ajuste') {
                 newQty = qty; // Ajuste sets absolute value
             }
 
-            console.log(`📦 Calculation: currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}, status=${status}`);
+            console.log(`📦 Calculation (DB fresh): currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}, status=${status}`);
 
             // Use snake_case to match PostgreSQL column naming convention
             const dbRecord = {
@@ -722,10 +1148,9 @@ export const useInventory = (companyId) => {
 
             console.log('✅ Movement inserted:', data);
 
-            // Si el movimiento es aprobado directamente, actualizar el producto
+            // BUG-2 FIX: Si el movimiento es aprobado, actualizar el producto directamente
+            // Ya tenemos el newQty calculado correctamente con stock fresco de DB
             if (status === 'approved' && productId) {
-                console.log(`📦 Actualizando producto ${productId} a cantidad: ${newQty}`);
-
                 const { data: updatedProduct, error: updateError } = await supabase
                     .from(TABLES.PRODUCTS)
                     .update({
@@ -773,39 +1198,109 @@ export const useInventory = (companyId) => {
             const movementId = movement.id;
             if (!movementId) throw new Error('Movement ID not found');
 
-            // Update movement status
-            await updateMovement(movementId, {
-                status: 'approved',
-                approved_at: new Date().toISOString()
-            });
+            console.log('🚀 approveMovement iniciado para movimiento:', movementId);
 
             // Find product - handle both productId (camelCase) and product_id (snake_case)
             const productId = movement.productId || movement.product_id;
-            const product = products.find(p => p.id === productId);
+            console.log('🔍 ProductId del movimiento:', productId);
 
-            if (product) {
-                let newQuantity = product.quantity || 0;
-                const movementType = (movement.type || '').toLowerCase();
-                const qty = parseInt(movement.quantity) || 0;
-
-                if (movementType === 'entrada') {
-                    newQuantity += qty;
-                } else if (movementType === 'salida') {
-                    newQuantity -= qty;
-                } else if (movementType === 'ajuste') {
-                    newQuantity = qty;
-                }
-
-                // Update the movement with newQty for display
-                await updateMovement(movementId, { newQty: newQuantity });
-
-                // Update product quantity
-                await updateProduct(product.id, { quantity: newQuantity });
+            if (!productId) {
+                console.error('❌ El movimiento no tiene product_id');
+                throw new Error('Movement has no product_id');
             }
 
+            // Obtener producto directamente de la DB (no del cache)
+            console.log('📥 Buscando producto en DB...');
+            const { data: product, error: fetchError } = await supabase
+                .from(TABLES.PRODUCTS)
+                .select('*')
+                .eq('id', productId)
+                .eq('company_id', companyId)
+                .single();
+
+            if (fetchError) {
+                console.error('❌ Error buscando producto:', fetchError);
+                throw fetchError;
+            }
+
+            if (!product) {
+                console.error('❌ Producto no encontrado con id:', productId);
+                throw new Error(`Product not found: ${productId}`);
+            }
+
+            console.log('✅ Producto encontrado:', product.description, 'Stock actual:', product.quantity);
+
+            // RE-LEER stock fresco de la DB para evitar race condition
+            const { data: freshProduct } = await supabase
+                .from(TABLES.PRODUCTS)
+                .select('quantity')
+                .eq('id', productId)
+                .eq('company_id', companyId)
+                .single();
+
+            const currentQty = freshProduct?.quantity || 0;
+            const movementType = (movement.type || '').toLowerCase();
+            const qty = parseInt(movement.quantity) || 0;
+            let newQuantity = currentQty;
+
+            if (movementType === 'entrada') {
+                newQuantity = currentQty + qty;
+            } else if (movementType === 'salida') {
+                newQuantity = Math.max(0, currentQty - qty);
+            } else if (movementType === 'ajuste') {
+                newQuantity = qty; // Ajuste sets absolute value
+            }
+
+            console.log(`📦 Re-lectura atomica: stockFresco=${currentQty}, final=${newQuantity}`);
+
+            // 1. Actualizar el movimiento con status approved y new_qty
+            console.log('📝 Actualizando movimiento a approved...');
+            const { error: movError } = await supabase
+                .from(TABLES.MOVEMENTS)
+                .update({
+                    status: 'approved',
+                    approved_at: new Date().toISOString(),
+                    new_qty: newQuantity
+                })
+                .eq('id', movementId);
+
+            if (movError) {
+                console.error('❌ Error actualizando movimiento:', movError);
+                throw movError;
+            }
+            console.log('✅ Movimiento actualizado a approved');
+
+            // 2. Actualizar el producto con stock recalculado
+            console.log(`📝 Actualizando producto ${productId} con quantity=${newQuantity}...`);
+            const { data: updatedProduct, error: updateError } = await supabase
+                .from(TABLES.PRODUCTS)
+                .update({
+                    quantity: newQuantity,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', productId)
+                .eq('company_id', companyId)
+                .select()
+                .single();
+
+            if (updateError) {
+                console.error('❌ Error actualizando producto:', updateError);
+                throw updateError;
+            }
+
+            if (updatedProduct) {
+                console.log('✅ PRODUCTO ACTUALIZADO EXITOSAMENTE:', updatedProduct.description, 'Nuevo stock:', updatedProduct.quantity);
+            } else {
+                console.error('❌ Update no retorno producto - posible problema de matching');
+            }
+
+            // 3. Refrescar datos en UI
+            console.log('🔄 Refrescando datos...');
             await fetchData();
+            console.log('✅ approveMovement completado exitosamente');
+
         } catch (error) {
-            console.error('Error approving movement:', error);
+            console.error('❌ Error en approveMovement:', error);
             throw error;
         }
     };
@@ -823,33 +1318,133 @@ export const useInventory = (companyId) => {
         }
     };
 
-    // ========== PURCHASES ==========
-    const addPurchase = async (purchaseData) => {
+    // ========== PRODUCT MOVEMENT HISTORY ==========
+    const getProductMovementHistory = async (productId) => {
         try {
+            if (!productId || !companyId) return [];
+
+            const { data, error } = await supabase
+                .from(TABLES.MOVEMENTS)
+                .select('*')
+                .eq('company_id', companyId)
+                .eq('product_id', productId)
+                .order('date', { ascending: false });
+
+            if (error) {
+                console.error('Error fetching product movement history:', error);
+                throw error;
+            }
+
+            return data || [];
+        } catch (error) {
+            console.error('Error in getProductMovementHistory:', error);
+            return [];
+        }
+    };
+
+    // ========== PURCHASES ==========
+    const addPurchase = async (purchaseData, userName = 'Usuario') => {
+        try {
+            // Si es un array, convertir a estructura de una sola compra con items
+            const items = Array.isArray(purchaseData) ? purchaseData : [purchaseData];
+
+            // Extraer datos del primer item para info de proveedor/factura
+            const firstItem = items[0] || {};
+            const invoiceNumber = firstItem.invoiceNumber || '';
+            const providerName = firstItem.providerName || 'Proveedor';
+
+            // ========== VALIDAR FACTURA DUPLICADA ==========
+            if (invoiceNumber) {
+                const { data: existingPurchase } = await supabase
+                    .from(TABLES.PURCHASES)
+                    .select('id, invoice_number')
+                    .eq('company_id', companyId)
+                    .eq('invoice_number', invoiceNumber)
+                    .single();
+
+                if (existingPurchase) {
+                    throw new Error(`La factura "${invoiceNumber}" ya fue registrada anteriormente. Por favor verifique.`);
+                }
+            }
+
+            // Calcular total
+            const total = items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
+
+            // Formatear items para el campo JSONB
+            const formattedItems = items.map(item => ({
+                productId: String(item.productId),
+                productName: item.productName,
+                productSku: item.productSku,
+                productReference: item.productReference,
+                quantity: parseInt(item.quantity) || 0,
+                unit: item.unit || 'Pza',
+                unitCost: parseFloat(item.cost) || 0,
+                total: parseFloat(item.total) || 0
+            }));
+
+            const purchaseRecord = {
+                company_id: companyId,
+                provider_id: null,
+                provider_name: providerName,
+                invoice_number: invoiceNumber,
+                items: formattedItems,
+                subtotal: total,
+                tax: 0,
+                total: total,
+                status: 'completed',
+                date: new Date().toISOString().split('T')[0],
+                created_by: userName,
+                created_at: new Date().toISOString()
+            };
+
             const { data: purchase, error } = await supabase
                 .from(TABLES.PURCHASES)
-                .insert({
-                    ...purchaseData,
-                    company_id: companyId,
-                    created_at: new Date().toISOString()
-                })
+                .insert(purchaseRecord)
                 .select()
                 .single();
 
             if (error) throw error;
 
-            // Update product quantities for each item
-            if (purchaseData.items && purchaseData.items.length > 0) {
-                for (const item of purchaseData.items) {
-                    if (item.productId) {
-                        const product = products.find(p => p.id === item.productId);
-                        if (product) {
-                            await updateProduct(product.id, {
-                                quantity: (product.quantity || 0) + item.quantity,
-                                cost: item.cost || product.cost,
-                                price: item.price || product.price
-                            });
-                        }
+            // ========== ACTUALIZAR STOCK Y REGISTRAR MOVIMIENTOS ==========
+            // Usa addMovement como unica puerta de entrada para stock
+            for (const item of items) {
+                if (item.productId) {
+                    const qty = parseFloat(item.quantity) || 0;
+
+                    // Actualizar costo del producto (sin tocar quantity, eso lo hace addMovement)
+                    if (item.cost) {
+                        await supabase
+                            .from(TABLES.PRODUCTS)
+                            .update({
+                                cost: parseFloat(item.cost),
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', item.productId)
+                            .eq('company_id', companyId);
+                    }
+
+                    // Leer datos frescos del producto para sku/nombre
+                    const { data: freshProduct } = await supabase
+                        .from(TABLES.PRODUCTS)
+                        .select('id, sku, reference, description')
+                        .eq('id', item.productId)
+                        .eq('company_id', companyId)
+                        .single();
+
+                    if (freshProduct) {
+                        // addMovement lee stock fresco, calcula new_qty, inserta movimiento y actualiza product.quantity
+                        await addMovement({
+                            productId: freshProduct.id,
+                            sku: freshProduct.sku || freshProduct.reference || '',
+                            productName: freshProduct.description || '',
+                            type: 'Entrada',
+                            quantity: qty,
+                            reason: `compra`,
+                            status: 'approved',
+                            createdBy: userName
+                        });
+
+                        console.log(`📦 Compra (via addMovement): +${qty} de ${freshProduct.description}`);
                     }
                 }
             }
@@ -1167,6 +1762,7 @@ export const useInventory = (companyId) => {
         addProduct,
         updateProduct,
         deleteProduct,
+        deleteProductsBatch,
         addProductsBatch,
 
         // Provider functions
@@ -1183,6 +1779,7 @@ export const useInventory = (companyId) => {
 
         // Sale functions
         addSale,
+        addSalesBatch,
         updateSale,
         deleteSale,
 
@@ -1191,6 +1788,12 @@ export const useInventory = (companyId) => {
         updateMovement,
         approveMovement,
         rejectMovement,
+        getProductMovementHistory,
+
+        // Provider functions
+        addProvider,
+        updateProvider,
+        getOrCreateProvider,
 
         // Purchase functions
         addPurchase,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, RefreshCw, Plus } from 'lucide-react';
+import { supabase } from '../supabase';
 
 const ProductForm = ({
     isOpen,
@@ -68,7 +69,11 @@ const ProductForm = ({
 
     useEffect(() => {
         if (editProduct) {
-            setFormData(editProduct);
+            // Limpiar propiedades temporales del frontend (ej: _relevance)
+            const cleanProduct = Object.fromEntries(
+                Object.entries(editProduct).filter(([key]) => !key.startsWith('_'))
+            );
+            setFormData(cleanProduct);
         } else {
             setFormData({
                 sku: '',
@@ -87,10 +92,26 @@ const ProductForm = ({
         }
     }, [editProduct, isOpen]);
 
+    // SKU DUPLICATE VALIDATION - Real-time check
+    useEffect(() => {
+        if (!formData.sku || formData.sku.trim() === '') {
+            setIsDuplicateSKU(false);
+            return;
+        }
+
+        // When editing, exclude the current product from validation
+        const isDuplicate = products.some(p =>
+            p.sku?.toLowerCase() === formData.sku.toLowerCase() &&
+            p.id !== editProduct?.id
+        );
+
+        setIsDuplicateSKU(isDuplicate);
+    }, [formData.sku, products, editProduct]);
+
     // Auto-generate SKU when Brand or Category changes (Only for new products)
-    const generateSku = (showAlert = true) => {
+    const generateSku = async (showAlert = true) => {
         if (!formData.brand || !formData.category) {
-            if (showAlert) alert('Por favor seleccione la Marca y Categoría primero.');
+            if (showAlert) alert('Por favor seleccione la Marca y Categoria primero.');
             return;
         }
 
@@ -102,18 +123,17 @@ const ProductForm = ({
         const selectedCategory = categories.find(c => c.name === formData.category);
         const catCode = selectedCategory ? selectedCategory.code : '999';
 
-        // 3. Sequence (Fix: Find Max Sequence + 1)
-        const relatedProducts = products.filter(p =>
-            p.brand === formData.brand &&
-            p.category === formData.category
-        );
+        // 3. Buscar en Supabase TODOS los productos con ese prefijo (incluye stock 0)
+        const skuPrefix = `${brandCode}-${catCode}-`;
+        const { data: dbProducts } = await supabase
+            .from('products')
+            .select('sku')
+            .ilike('sku', `${skuPrefix}%`);
 
         let maxSequence = 0;
-
-        relatedProducts.forEach(p => {
+        (dbProducts || []).forEach(p => {
             if (p.sku) {
                 const parts = p.sku.split('-');
-                // Assuming format BBB-CCC-NNN
                 if (parts.length >= 3) {
                     const seq = parseInt(parts[parts.length - 1]);
                     if (!isNaN(seq) && seq > maxSequence) {
@@ -124,7 +144,6 @@ const ProductForm = ({
         });
 
         const nextSeq = (maxSequence + 1).toString().padStart(3, '0');
-
         const newSku = `${brandCode}-${catCode}-${nextSeq}`;
         setFormData(prev => ({ ...prev, sku: newSku }));
     };

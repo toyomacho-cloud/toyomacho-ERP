@@ -11,6 +11,7 @@ import {
     X,
     FileCheck
 } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
 
 // Componentes del modulo
 import ProductSearch from './ProductSearch';
@@ -24,6 +25,7 @@ import WizardNav from './WizardNav';
 import { useSalesStore } from '../store/useSalesStore';
 import { calcularEstadisticasDiarias } from '../utils/salesCalculations';
 import { prepararDatosVenta, generarDatosFactura } from '../services/salesService';
+import { descargarPDFPedido } from '../utils/pdfPedidoGenerator';
 
 const SalesPanel = ({
     productos,
@@ -34,6 +36,7 @@ const SalesPanel = ({
     cargandoTasas,
     onRefrescarTasas,
     onGuardarVenta,
+    onGuardarVentaBatch,
     onCrearCliente,
     onMostrarVentasDelDia
 }) => {
@@ -45,6 +48,8 @@ const SalesPanel = ({
 
     // Store de ventas
     const store = useSalesStore(tasaCambio);
+    const { currentUser, userProfile } = useAuth();
+    const nombreUsuario = userProfile?.display_name || userProfile?.displayName || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Usuario';
     const {
         carritos,
         carritoActivoId,
@@ -126,20 +131,44 @@ const SalesPanel = ({
             console.log('📝 Items preparados:', items);
             console.log('🔢 Numero documento:', numeroDocumento);
 
-            // Guardar ventas
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                console.log(`💾 Guardando item ${i + 1}/${items.length}:`, item);
-                await onGuardarVenta(item, []);
-                console.log(`✅ Item ${i + 1} guardado`);
+            // Guardar ventas usando BATCH (descuenta stock correctamente)
+            const itemsConUsuario = items.map(item => ({ ...item, user_name: nombreUsuario }));
+            console.log(`💾 Guardando ${itemsConUsuario.length} items en batch con usuario: ${nombreUsuario}`);
+
+            if (onGuardarVentaBatch) {
+                await onGuardarVentaBatch(itemsConUsuario, [], nombreUsuario);
+            } else {
+                // Fallback: guardar uno por uno (legacy)
+                for (let i = 0; i < items.length; i++) {
+                    await onGuardarVenta({ ...items[i], user_name: nombreUsuario }, []);
+                }
             }
+            console.log('✅ Todos los items guardados exitosamente');
 
             console.log('🎉 Todas las ventas guardadas exitosamente');
 
             // Generar PDF si se solicito
             if (generarPDF) {
                 console.log('📄 Generando PDF para venta', numeroDocumento);
-                alert(`Venta ${numeroDocumento} completada. PDF en desarrollo.`);
+                try {
+                    const datosPDF = {
+                        items: carritoActivo.carrito,
+                        numeroDocumento,
+                        cliente: carritoActivo.tipoCliente === 'rapida' ? null : carritoActivo.clienteSeleccionado,
+                        subtotal,
+                        total,
+                        totalBs,
+                        tasaCambio,
+                        tipoVenta: carritoActivo.tipoVenta,
+                        diasCredito: carritoActivo.diasCredito
+                    };
+                    const filename = descargarPDFPedido(datosPDF);
+                    console.log('✅ PDF descargado:', filename);
+                    alert(`Venta ${numeroDocumento} completada. PDF descargado.`);
+                } catch (pdfError) {
+                    console.error('Error generando PDF:', pdfError);
+                    alert(`Venta ${numeroDocumento} completada. Error al generar PDF.`);
+                }
             } else {
                 alert(`Venta ${numeroDocumento} completada exitosamente.`);
             }

@@ -19,6 +19,7 @@ const Reports = lazy(() => import('./components/Reports'));
 const Article177Report = lazy(() => import('./components/Article177Report'));
 const Clients = lazy(() => import('./components/Clients'));
 const AccountsReceivable = lazy(() => import('./components/AccountsReceivable'));
+const Transfers = lazy(() => import('./components/Transfers'));
 
 // Main App Content (requires auth and company)
 function AppContent() {
@@ -96,6 +97,8 @@ function AppContent() {
         return <Inventory />;
       case 'control':
         return <InventoryControl />;
+      case 'transfers':
+        return <Transfers />;
       case 'purchases':
         return <Purchases />;
       case 'pos':

@@ -36,16 +36,10 @@ const STORAGE_KEYS = {
 
 const Settings = () => {
     const {
-        currentUser,
-        userProfile,
-        users,
-        fetchUsers,
-        register,
-        updateUserRole,
-        toggleUserActive,
-        updateUserModules,
-        isAdmin,
-        logout
+        currentUser, userProfile, users, register, logout,
+        fetchUsers, updateUserRole, toggleUserActive, updateUserModules,
+        hasPermission, isAdmin, canAccessModule, changePassword,
+        ROLES, PERMISSIONS, AVAILABLE_MODULES, DEFAULT_MODULES
     } = useAuth();
 
     const { products, categories, brands, deleteProduct } = useInventoryContext();
@@ -86,6 +80,7 @@ const Settings = () => {
 
     // Module permissions modal state
     const [editingModulesUser, setEditingModulesUser] = useState(null);
+    const [tempModules, setTempModules] = useState({});
 
     // Duplicate SKUs detection
     const [duplicateSKUs, setDuplicateSKUs] = useState([]);
@@ -93,6 +88,38 @@ const Settings = () => {
     const [productsToDelete, setProductsToDelete] = useState([]);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deletingDuplicates, setDeletingDuplicates] = useState(false);
+
+    // Change password states
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmNewPassword, setConfirmNewPassword] = useState('');
+    const [passwordError, setPasswordError] = useState('');
+    const [passwordSuccess, setPasswordSuccess] = useState(false);
+    const [changingPassword, setChangingPassword] = useState(false);
+
+    const handleChangePassword = async () => {
+        setPasswordError('');
+        setPasswordSuccess(false);
+
+        if (!newPassword || newPassword.length < 6) {
+            setPasswordError('La contrasena debe tener al menos 6 caracteres.');
+            return;
+        }
+        if (newPassword !== confirmNewPassword) {
+            setPasswordError('Las contrasenas no coinciden.');
+            return;
+        }
+
+        setChangingPassword(true);
+        const result = await changePassword(newPassword);
+        if (result.success) {
+            setPasswordSuccess(true);
+            setNewPassword('');
+            setConfirmNewPassword('');
+        } else {
+            setPasswordError(result.error);
+        }
+        setChangingPassword(false);
+    };
 
     // Function to find duplicate SKUs
     const findDuplicateSKUs = () => {
@@ -265,7 +292,7 @@ const Settings = () => {
     const handleEditUser = (user) => {
         setEditingUser(user);
         setNewUserForm({
-            displayName: user.displayName || '',
+            displayName: user.display_name || user.displayName || '',
             email: user.email || '',
             password: '',
             role: user.role || ROLES.VENDEDOR
@@ -572,13 +599,83 @@ const Settings = () => {
                         </div>
                     </div>
 
+                    {/* Cambiar Contrasena */}
+                    <div style={{
+                        marginTop: '2rem',
+                        padding: '1.5rem',
+                        background: 'rgba(14, 165, 233, 0.05)',
+                        border: '1px solid rgba(14, 165, 233, 0.2)',
+                        borderRadius: 'var(--radius-md)'
+                    }}>
+                        <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
+                            🔑 Cambiar Contrasena
+                        </h4>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                    Nueva Contrasena
+                                </label>
+                                <input
+                                    type="password"
+                                    value={newPassword || ''}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Minimo 6 caracteres"
+                                />
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                    Confirmar Contrasena
+                                </label>
+                                <input
+                                    type="password"
+                                    value={confirmNewPassword || ''}
+                                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                    placeholder="Repetir contrasena"
+                                />
+                            </div>
+                        </div>
+                        {passwordError && (
+                            <div style={{
+                                marginTop: '0.75rem',
+                                padding: '0.5rem 0.75rem',
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                borderRadius: 'var(--radius-sm)',
+                                color: '#dc2626',
+                                fontSize: '0.85rem'
+                            }}>
+                                {passwordError}
+                            </div>
+                        )}
+                        {passwordSuccess && (
+                            <div style={{
+                                marginTop: '0.75rem',
+                                padding: '0.5rem 0.75rem',
+                                background: 'rgba(16, 185, 129, 0.1)',
+                                borderRadius: 'var(--radius-sm)',
+                                color: '#059669',
+                                fontSize: '0.85rem'
+                            }}>
+                                Contrasena cambiada exitosamente.
+                            </div>
+                        )}
+                        <button
+                            onClick={handleChangePassword}
+                            className="btn btn-primary"
+                            disabled={changingPassword}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            <Save size={18} />
+                            {changingPassword ? 'Cambiando...' : 'Cambiar Contrasena'}
+                        </button>
+                    </div>
+
                     <div style={{ marginTop: '2rem' }}>
                         <button
                             onClick={handleLogout}
                             className="btn btn-danger"
                             style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                         >
-                            <LogOut size={18} /> Cerrar Sesión
+                            <LogOut size={18} /> Cerrar Sesion
                         </button>
                     </div>
                 </div>
@@ -916,9 +1013,9 @@ const Settings = () => {
                                                     justifyContent: 'center',
                                                     fontWeight: 600
                                                 }}>
-                                                    {user.displayName?.charAt(0).toUpperCase() || 'U'}
+                                                    {(user.display_name || user.displayName)?.charAt(0).toUpperCase() || 'U'}
                                                 </div>
-                                                <span>{user.displayName}</span>
+                                                <span>{user.display_name || user.displayName || user.email}</span>
                                             </div>
                                         </td>
                                         <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{user.email}</td>

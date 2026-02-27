@@ -54,7 +54,7 @@ const PAYMENT_METHODS = {
 const POS = () => {
     const { currentCompany } = useCompany();
     const { currentUser } = useAuth();
-    const { products, sales, customers, addSale, addCustomer, cashSession } = useInventory(currentCompany?.id);
+    const { products, sales, customers, addSale, addSalesBatch, addCustomer, cashSession } = useInventory(currentCompany?.id);
     const { bcvRate, usdtRate: binanceRate, loading: loadingRates, refreshRates } = useExchangeRates();
 
     // Local State
@@ -64,6 +64,7 @@ const POS = () => {
     const [activeCartId, setActiveCartId] = useState(1);
     const [showSalesModal, setShowSalesModal] = useState(false);
     const [posMode, setPosMode] = useState('sale'); // 'sale' or 'quote'
+    const [isProcessing, setIsProcessing] = useState(false); // Proteccion contra doble-click
 
     // Exchange Rate State (Global for POS)
     const [exchangeRate, setExchangeRate] = useState(36.5);
@@ -209,23 +210,35 @@ const POS = () => {
         setCarts(carts.map(c => c.id === activeCartId ? { ...c, ...updates } : c));
     };
 
-    // --- Search & Filters ---
+    // --- Search & Filters (OPTIMIZED) ---
 
     const debouncedPOSSearch = useCallback(
         debounce((term) => {
             if (!term || !term.trim()) {
                 setSearchResults([]);
+                setLoadingProducts(false);
                 return;
             }
+            setLoadingProducts(true);
             const termLower = term.toLowerCase().trim();
+
+            // Quick exit if term is too short
+            if (termLower.length < 2) {
+                setSearchResults([]);
+                setLoadingProducts(false);
+                return;
+            }
+
             const results = products.filter(p => {
                 const desc = (p.description || '').toLowerCase();
                 const sku = (p.sku || '').toLowerCase();
                 const ref = (p.reference || '').toLowerCase();
                 return desc.includes(termLower) || sku.includes(termLower) || ref.includes(termLower);
             });
-            setSearchResults(results.slice(0, 100));
-        }, 300),
+            // Limit to 30 results for dropdown performance
+            setSearchResults(results.slice(0, 30));
+            setLoadingProducts(false);
+        }, 200),
         [products]
     );
 
@@ -344,75 +357,104 @@ const POS = () => {
     // --- Finalize Sale ---
 
     const finalizeSale = async () => {
+        // Proteccion contra doble-click
+        if (isProcessing) {
+            console.log('⚠️ Operacion en proceso, ignorando click duplicado');
+            return;
+        }
+
         if (activeCartItems.length === 0) return;
+
+        const isQuote = posMode === 'quote';
+
+        // Validar stock ANTES de procesar (solo para ventas, no presupuestos)
+        if (!isQuote) {
+            for (const item of activeCartItems) {
+                const product = products.find(p => p.id === item.productId);
+                if (product) {
+                    const stockDisponible = product.quantity || 0;
+                    if (item.qty > stockDisponible) {
+                        alert(`❌ Stock insuficiente para "${item.description}".\n\nSolicitado: ${item.qty}\nDisponible: ${stockDisponible}`);
+                        return;
+                    }
+                }
+            }
+        }
+
         // Logic to validate payment if 'contado'
-        if (saleType === 'contado' && !isFullyPaid && !posMode === 'quote') {
+        if (saleType === 'contado' && !isFullyPaid && !isQuote) {
             alert('El monto pagado debe cubrir el total de la venta.');
             return;
         }
 
-        const isQuote = posMode === 'quote';
-        // Date calc
-        const today = new Date();
-        const dueDate = saleType === 'credito'
-            ? new Date(today.getTime() + (creditDays * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]
-            : null;
-
-        let expiresAt = null;
-        if (isQuote) {
-            const midnight = new Date();
-            midnight.setHours(23, 59, 59, 999);
-            expiresAt = midnight.toISOString();
-        }
-
-        // Generate ID
-        const todaySales = sales.filter(s => s.date === today.toISOString().split('T')[0]);
-        const prefix = isQuote ? 'PR-' : '';
-        const newDocNumber = prefix + String(todaySales.length + 1).padStart(6, '0');
-
-        const saleItems = activeCartItems.map(item => ({
-            product_id: item.productId,
-            sku: item.sku,
-            reference: item.reference || '',
-            description: item.description,
-            quantity: item.qty,
-            unit_price: item.priceUSD,
-            amount_usd: item.priceUSD * item.qty,
-            amount_bs: item.priceUSD * item.qty * exchangeRate,
-            date: today.toISOString().split('T')[0],
-            payment_type: isQuote ? 'presupuesto' : saleType,
-            credit_days: saleType === 'credito' ? creditDays : null,
-            due_date: dueDate,
-            payment_currency: 'USD',
-            exchange_rate: exchangeRate,
-            document_type: isQuote ? 'presupuesto' : documentType,
-            document_number: newDocNumber,
-            has_iva: documentType === 'factura' && !isQuote,
-            iva_amount: (documentType === 'factura' && !isQuote) ? (item.priceUSD * item.qty) * 0.16 : 0,
-            customer_id: customerType === 'quick' ? null : customer?.id,
-            is_quote: isQuote,
-            expires_at: expiresAt,
-            status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
-            payment_status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
-            paid_amount: (saleType === 'credito' || isQuote) ? 0 : (item.priceUSD * item.qty),
-            remaining_amount: (saleType === 'credito' || isQuote) ? (item.priceUSD * item.qty) : 0
-        }));
+        // Activar proteccion
+        setIsProcessing(true);
+        console.log('🔒 Procesando venta...');
 
         try {
-            // Add sales and payments
-            for (const item of saleItems) {
-                // Pass payment methods only for the first item (or handle batch logic on backend, keep simple here)
-                // NOTE: `addSale` implementation handles creating cash_transactions if paymentMethods provided
-                // We should only pass payment methods once per "Ticket", but currently our DB structure is 1 row per item.
-                // Ideally we'd have a Sales Header. For now, we attach payments to the *first* item or handle logic to not dupe.
-                // Improving: To avoid duplicate payment entries if calling addSale multiple times, we'll only pass payment info
-                // on the first item, OR better, refactor `addSale` to batch.
-                // Given constraints, I will pass payments on the FIRST item.
-                const isFirst = item === saleItems[0];
-                const paymentsToPass = (isFirst && !isQuote && saleType === 'contado') ? paymentMethods : [];
+            // Date calc
+            const today = new Date();
+            const dueDate = saleType === 'credito'
+                ? new Date(today.getTime() + (creditDays * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]
+                : null;
 
-                await addSale(item, paymentsToPass);
+            let expiresAt = null;
+            if (isQuote) {
+                const midnight = new Date();
+                midnight.setHours(23, 59, 59, 999);
+                expiresAt = midnight.toISOString();
             }
+
+            // Generate ID
+            const todaySales = sales.filter(s => s.date === today.toISOString().split('T')[0]);
+            const prefix = isQuote ? 'PR-' : '';
+            const newDocNumber = prefix + String(todaySales.length + 1).padStart(6, '0');
+
+            const saleItems = activeCartItems.map(item => ({
+                product_id: item.productId,
+                sku: item.sku,
+                reference: item.reference || '',
+                description: item.description,
+                quantity: item.qty,
+                unit_price: item.priceUSD,
+                amount_usd: item.priceUSD * item.qty,
+                amount_bs: item.priceUSD * item.qty * exchangeRate,
+                date: today.toISOString().split('T')[0],
+                payment_type: isQuote ? 'presupuesto' : saleType,
+                credit_days: saleType === 'credito' ? creditDays : null,
+                due_date: dueDate,
+                payment_currency: 'USD',
+                exchange_rate: exchangeRate,
+                document_type: isQuote ? 'presupuesto' : documentType,
+                document_number: newDocNumber,
+                has_iva: documentType === 'factura' && !isQuote,
+                iva_amount: (documentType === 'factura' && !isQuote) ? (item.priceUSD * item.qty) * 0.16 : 0,
+                customer_id: customerType === 'quick' ? null : customer?.id,
+                is_quote: isQuote,
+                expires_at: expiresAt,
+                status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
+                payment_status: isQuote ? 'pending' : (saleType === 'credito' ? 'pending' : 'paid'),
+                paid_amount: (saleType === 'credito' || isQuote) ? 0 : (item.priceUSD * item.qty),
+                remaining_amount: (saleType === 'credito' || isQuote) ? (item.priceUSD * item.qty) : 0
+            }));
+
+            // OPTIMIZADO: Usar batch insert en lugar de loop secuencial
+            const paymentsToPass = (!isQuote && saleType === 'contado') ? paymentMethods : [];
+
+            // Buscar nombre en todas las posibles propiedades
+            const userName = currentUser?.display_name
+                || currentUser?.displayName
+                || currentUser?.name
+                || currentUser?.email?.split('@')[0]
+                || 'Usuario POS';
+            console.log('🔍 Usuario para venta:', {
+                display_name: currentUser?.display_name,
+                displayName: currentUser?.displayName,
+                name: currentUser?.name,
+                email: currentUser?.email,
+                userName
+            });
+            await addSalesBatch(saleItems, paymentsToPass, userName);
 
             // Success State
             setCompletedSale({
@@ -435,9 +477,18 @@ const POS = () => {
             setDocumentNumber(newDocNumber);
             updateActiveCart({ step: 5 }); // Success screen
 
+            // Auto-retorno a productos despues de 2 segundos
+            setTimeout(() => {
+                startNewSale();
+            }, 2000);
+
         } catch (error) {
             console.error('Finalize Sale Error:', error);
             alert('Error al finalizar la venta');
+        } finally {
+            // Desactivar proteccion
+            setIsProcessing(false);
+            console.log('🔓 Proceso completado');
         }
     };
 

@@ -34,10 +34,14 @@ const MovementForm = () => {
     }).slice(0, 5); // Limit to 5 results
 
     const handleSubmit = async (e) => {
-        console.log('🔵 handleSubmit called!');
+        console.log('🔵 handleSubmit called!', { selectedProduct, formData });
         e.preventDefault();
         if (!selectedProduct) {
-            setMessage({ type: 'error', text: 'Seleccione un producto' });
+            setMessage({ type: 'error', text: 'Debe seleccionar un producto de la lista desplegable. Escriba el nombre/SKU y haga clic en el resultado.' });
+            return;
+        }
+        if (!formData.quantity || parseFloat(formData.quantity) <= 0) {
+            setMessage({ type: 'error', text: 'La cantidad debe ser mayor a 0' });
             return;
         }
 
@@ -110,7 +114,7 @@ const MovementForm = () => {
                         <div style={{ position: 'relative' }}>
                             <input
                                 type="text"
-                                placeholder="Buscar por Referencia o Descripción..."
+                                placeholder="Buscar por Referencia o Descripcion..."
                                 value={searchTerm}
                                 onChange={(e) => {
                                     setSearchTerm(e.target.value);
@@ -118,11 +122,29 @@ const MovementForm = () => {
                                         setSelectedProduct(null);
                                     }
                                 }}
-                                style={{ paddingRight: '2.5rem' }}
+                                style={{
+                                    paddingRight: '2.5rem',
+                                    borderColor: selectedProduct ? '#059669' : undefined,
+                                    borderWidth: selectedProduct ? '2px' : undefined
+                                }}
                                 required={!selectedProduct}
                             />
-                            <Search size={16} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                            {selectedProduct ? (
+                                <CheckCircle size={16} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#059669' }} />
+                            ) : (
+                                <Search size={16} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                            )}
                         </div>
+                        {selectedProduct && (
+                            <div style={{ fontSize: '0.8rem', color: '#059669', marginTop: '0.3rem', fontWeight: 600 }}>
+                                ✅ {selectedProduct.description} — Stock: {selectedProduct.quantity}
+                            </div>
+                        )}
+                        {!selectedProduct && searchTerm && (
+                            <div style={{ fontSize: '0.8rem', color: '#dc2626', marginTop: '0.3rem' }}>
+                                ⚠️ Seleccione un producto de la lista
+                            </div>
+                        )}
 
                         {/* Search Results Dropdown */}
                         {searchTerm && !selectedProduct && filteredProducts.length > 0 && (
@@ -144,19 +166,19 @@ const MovementForm = () => {
                                             setSearchTerm(p.description);
                                         }}
                                         style={{
-                                            padding: '0.5rem',
+                                            padding: '0.6rem 0.5rem',
                                             cursor: 'pointer',
                                             borderBottom: '1px solid var(--border-color)',
-                                            fontSize: '0.9rem'
+                                            fontSize: '1rem'
                                         }}
                                         onMouseOver={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
                                         onMouseOut={(e) => e.target.style.background = 'transparent'}
                                     >
-                                        <div style={{ fontWeight: 'bold', color: 'var(--accent-primary)' }}>{p.reference || p.sku}</div>
-                                        <div style={{ fontSize: '0.85em' }}>{p.description}</div>
-                                        <div style={{ fontSize: '0.75em', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                                        <div style={{ fontWeight: '700', color: 'var(--accent-secondary)', fontSize: '1rem' }}>{p.reference || p.sku}</div>
+                                        <div style={{ fontSize: '0.95em', color: 'var(--text-primary)', fontWeight: '500' }}>{p.description}</div>
+                                        <div style={{ fontSize: '0.85em', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', fontWeight: '600', marginTop: '2px' }}>
                                             <span>SKU: {p.sku}</span>
-                                            <span style={{ color: p.quantity > 0 ? 'var(--success)' : 'var(--danger)' }}>Stock: {p.quantity}</span>
+                                            <span style={{ color: p.quantity > 0 ? '#059669' : '#dc2626' }}>Stock: {p.quantity}</span>
                                         </div>
                                     </div>
                                 ))}

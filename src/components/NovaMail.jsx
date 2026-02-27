@@ -131,7 +131,7 @@ const NovaMail = () => {
         return (
             <div className="animate-fade-in" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
                 <div style={{ textAlign: 'center' }}>
-                    <Mail size={48} style={{ color: 'var(--accent-primary)', marginBottom: '1rem' }} />
+                    <Mail size={48} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
                     <p>Cargando mensajes...</p>
                 </div>
             </div>
@@ -165,7 +165,7 @@ const NovaMail = () => {
                             alignItems: 'center',
                             gap: '0.5rem',
                             background: activeFolder === 'inbox' ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
-                            color: activeFolder === 'inbox' ? 'var(--accent-primary)' : 'var(--text-primary)',
+                            color: activeFolder === 'inbox' ? 'var(--primary)' : 'var(--text-primary)',
                             marginBottom: '0.5rem'
                         }}
                     >
@@ -173,7 +173,7 @@ const NovaMail = () => {
                         <span style={{ flex: 1 }}>Bandeja de entrada</span>
                         {unreadCount > 0 && (
                             <span style={{
-                                background: 'var(--accent-primary)',
+                                background: 'var(--primary)',
                                 color: 'white',
                                 padding: '0.125rem 0.5rem',
                                 borderRadius: '999px',
@@ -194,7 +194,7 @@ const NovaMail = () => {
                             alignItems: 'center',
                             gap: '0.5rem',
                             background: activeFolder === 'sent' ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
-                            color: activeFolder === 'sent' ? 'var(--accent-primary)' : 'var(--text-primary)'
+                            color: activeFolder === 'sent' ? 'var(--primary)' : 'var(--text-primary)'
                         }}
                     >
                         <Send size={18} />
@@ -250,7 +250,7 @@ const NovaMail = () => {
                                                 borderRadius: 'var(--radius-md)',
                                                 marginRight: '0.5rem',
                                                 marginBottom: '0.5rem',
-                                                color: 'var(--accent-primary)',
+                                                color: 'var(--primary)',
                                                 textDecoration: 'none'
                                             }}
                                         >
@@ -279,7 +279,7 @@ const NovaMail = () => {
                                         fontWeight: '500'
                                     }}
                                     onMouseEnter={(e) => {
-                                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.2)';
+                                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.15)';
                                         e.currentTarget.style.borderColor = 'rgba(220, 38, 38, 0.4)';
                                     }}
                                     onMouseLeave={(e) => {

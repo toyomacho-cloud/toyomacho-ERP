@@ -39,3 +39,16 @@ cleanup-*.js
 investigate-*.js
 count-*.js
 migrate-*.js
+
+# Diagnostic scripts
+*.cjs
+*.mjs
+delete-*.js
+inspect_*.js
+
+# SQL scripts (sueltos en raiz)
+*.sql
+
+# Backup directories
+backups-pre-*/
+restore-*.bat

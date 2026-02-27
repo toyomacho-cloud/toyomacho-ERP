@@ -292,7 +292,7 @@ const Article177Report = () => {
                             <th rowSpan="2" style={{ padding: '0.5rem', border: '1px solid var(--border-color)' }}>Descripción</th>
                             <th colSpan="3" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(100,100,100,0.2)' }}>EXIST. INICIAL</th>
                             <th colSpan="3" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(34, 139, 34, 0.3)' }}>ENTRADAS</th>
-                            <th colSpan="3" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(220, 38, 38, 0.2)' }}>SALIDAS</th>
+                            <th colSpan="3" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(220, 38, 38, 0.15)' }}>SALIDAS</th>
                             <th colSpan="2" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(234, 179, 8, 0.2)' }}>RETIROS</th>
                             <th colSpan="2" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(249, 115, 22, 0.2)' }}>AUTOCONSUMO</th>
                             <th colSpan="3" style={{ padding: '0.25rem', border: '1px solid var(--border-color)', background: 'rgba(34, 139, 34, 0.3)' }}>EXIST. FINAL</th>

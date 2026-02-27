@@ -146,16 +146,25 @@ const Purchases = () => {
         }
     };
 
-    const handleProviderSubmit = (e) => {
+    const handleProviderSubmit = async (e) => {
         e.preventDefault();
-        if (editingProvider) {
-            updateProvider(editingProvider.id, providerForm);
-        } else {
-            addProvider(providerForm);
+        try {
+            if (editingProvider) {
+                console.log('📝 Updating provider:', editingProvider.id, providerForm);
+                await updateProvider(editingProvider.id, providerForm);
+                console.log('✅ Provider updated successfully');
+            } else {
+                console.log('➕ Adding new provider:', providerForm);
+                await addProvider(providerForm);
+                console.log('✅ Provider added successfully');
+            }
+            setProviderForm({ name: '', contact: '' });
+            setEditingProvider(null);
+            setShowProviderModal(false);
+        } catch (error) {
+            console.error('❌ Error en proveedor:', error);
+            alert(`Error al ${editingProvider ? 'actualizar' : 'crear'} proveedor: ${error.message}`);
         }
-        setProviderForm({ name: '', contact: '' });
-        setEditingProvider(null);
-        setShowProviderModal(false);
     };
 
     const handleEditProvider = () => {
@@ -190,7 +199,7 @@ const Purchases = () => {
         const reportDate = new Date(historyDate).toLocaleDateString('es-VE', { timeZone: 'UTC' });
 
         // Filter purchases for selected date
-        const dailyPurchases = purchases.filter(purchase => purchase.date.startsWith(historyDate));
+        const dailyPurchases = purchases.filter(purchase => (purchase.date || '').startsWith(historyDate));
 
         if (dailyPurchases.length === 0) {
             alert('No hay compras registradas para la fecha seleccionada.');
@@ -204,22 +213,41 @@ const Purchases = () => {
         // Table Data
         const tableColumn = ["Fecha", "Proveedor", "Factura", "Producto", "Ref", "Cant.", "Total (USD)"];
         const tableRows = [];
+        let totalAmount = 0;
 
         dailyPurchases.forEach(purchase => {
-            const purchaseData = [
-                new Date(purchase.date).toLocaleDateString('es-VE'),
-                purchase.providerName,
-                purchase.invoiceNumber,
-                purchase.productName,
-                purchase.productReference || '-',
-                `${purchase.quantity} ${purchase.unit}`,
-                `$${purchase.total.toFixed(2)}`
-            ];
-            tableRows.push(purchaseData);
-        });
+            const providerName = purchase.provider_name || purchase.providerName || 'N/A';
+            const invoiceNumber = purchase.invoice_number || purchase.invoiceNumber || 'N/A';
+            const items = purchase.items || [];
 
-        // Calculate Total
-        const totalAmount = dailyPurchases.reduce((sum, purchase) => sum + (purchase.total || 0), 0);
+            if (items.length > 0) {
+                // Nueva estructura con items JSONB
+                items.forEach(item => {
+                    tableRows.push([
+                        new Date(purchase.date).toLocaleDateString('es-VE'),
+                        providerName,
+                        invoiceNumber,
+                        item.productName || 'N/A',
+                        item.productReference || item.productSku || '-',
+                        `${item.quantity || 0} ${item.unit || 'Pza'}`,
+                        `$${(parseFloat(item.total) || 0).toFixed(2)}`
+                    ]);
+                    totalAmount += parseFloat(item.total) || 0;
+                });
+            } else {
+                // Estructura antigua
+                tableRows.push([
+                    new Date(purchase.date).toLocaleDateString('es-VE'),
+                    providerName,
+                    invoiceNumber,
+                    purchase.productName || 'N/A',
+                    purchase.productReference || '-',
+                    `${purchase.quantity || 0} ${purchase.unit || 'Pza'}`,
+                    `$${(parseFloat(purchase.total) || 0).toFixed(2)}`
+                ]);
+                totalAmount += parseFloat(purchase.total) || 0;
+            }
+        });
 
         // Add Totals Row
         tableRows.push([
@@ -533,10 +561,44 @@ const Purchases = () => {
                 </div>
 
                 {(() => {
-                    const dailyPurchases = historyDate ? purchases.filter(p => p.date.startsWith(historyDate)) : [];
-                    const dailyTotal = dailyPurchases.reduce((sum, p) => sum + (p.total || 0), 0);
+                    const dailyPurchases = historyDate ? purchases.filter(p => (p.date || '').startsWith(historyDate)) : [];
+                    const dailyTotal = dailyPurchases.reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
 
-                    return dailyPurchases.length === 0 ? (
+                    // Aplanar items para mostrar cada producto como fila separada
+                    const flattenedRows = [];
+                    dailyPurchases.forEach(purchase => {
+                        const items = purchase.items || [];
+                        if (items.length > 0) {
+                            items.forEach((item, idx) => {
+                                flattenedRows.push({
+                                    id: `${purchase.id}-${idx}`,
+                                    date: purchase.date,
+                                    providerName: purchase.provider_name || purchase.providerName || 'N/A',
+                                    invoiceNumber: purchase.invoice_number || purchase.invoiceNumber || 'N/A',
+                                    productName: item.productName || 'N/A',
+                                    productReference: item.productReference || item.productSku || 'N/A',
+                                    quantity: item.quantity || 0,
+                                    unit: item.unit || 'Pza',
+                                    total: parseFloat(item.total) || 0
+                                });
+                            });
+                        } else {
+                            // Estructura antigua sin items JSONB
+                            flattenedRows.push({
+                                id: purchase.id,
+                                date: purchase.date,
+                                providerName: purchase.provider_name || purchase.providerName || 'N/A',
+                                invoiceNumber: purchase.invoice_number || purchase.invoiceNumber || 'N/A',
+                                productName: purchase.productName || 'N/A',
+                                productReference: purchase.productReference || 'N/A',
+                                quantity: purchase.quantity || 0,
+                                unit: purchase.unit || 'Pza',
+                                total: parseFloat(purchase.total) || 0
+                            });
+                        }
+                    });
+
+                    return flattenedRows.length === 0 ? (
                         <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>
                             No hay registros para la fecha seleccionada
                         </p>
@@ -556,7 +618,7 @@ const Purchases = () => {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {dailyPurchases.map((p) => (
+                                        {flattenedRows.map((p) => (
                                             <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={{ padding: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
                                                     {new Date(p.date).toLocaleDateString()}

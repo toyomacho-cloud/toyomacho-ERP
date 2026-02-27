@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, Settings, LogOut, ClipboardList, ShoppingCart, ArrowRightLeft, X, Building2, Mail, FileSpreadsheet, Scale, ChevronDown, Boxes, RefreshCw, Users, DollarSign, AlertTriangle, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, Settings, LogOut, ClipboardList, ShoppingCart, ArrowRightLeft, X, Building2, Mail, FileSpreadsheet, Scale, ChevronDown, Boxes, RefreshCw, Users, DollarSign, AlertTriangle, Wallet, Truck, User } from 'lucide-react';
 import { supabase } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 import { useCompany } from '../context/CompanyContext';
+import UserAccountModal from './UserAccountModal';
 
 const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
     const { logout, userProfile, canAccessModule } = useAuth();
@@ -10,6 +11,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
     const [unreadCount, setUnreadCount] = useState(0);
     const [pendingPaymentsCount, setPendingPaymentsCount] = useState(0);
     const [expandedMenus, setExpandedMenus] = useState(['inventoryManagement']);
+    const [showAccountModal, setShowAccountModal] = useState(false);
 
     // Subscribe to unread mail count (using Supabase)
     useEffect(() => {
@@ -75,7 +77,8 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
             icon: Boxes,
             submenu: [
                 { id: 'inventory', label: 'Productos', icon: Package },
-                { id: 'control', label: 'Control de Inventario', icon: ClipboardList }
+                { id: 'control', label: 'Control de Inventario', icon: ClipboardList },
+                { id: 'transfers', label: 'Traslados', icon: Truck }
             ]
         },
         { id: 'purchases', label: 'Compras', icon: ShoppingCart },
@@ -280,7 +283,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
                                             width: '100%',
                                             background: hasActiveChild ? 'rgba(220, 38, 38, 0.15)' : 'transparent',
                                             border: 'none',
-                                            color: hasActiveChild ? 'var(--accent-primary)' : 'var(--text-secondary)'
+                                            color: hasActiveChild ? '#1e293b' : 'var(--text-secondary)'
                                         }}
                                     >
                                         <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -370,16 +373,27 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose }) => {
                     })}
                 </nav>
 
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <button
+                        onClick={() => setShowAccountModal(true)}
+                        className="btn btn-secondary"
+                        style={{ justifyContent: 'flex-start', width: '100%', borderColor: 'transparent' }}
+                    >
+                        <User size={20} /> Mi Cuenta
+                    </button>
                     <button
                         onClick={handleLogout}
                         className="btn btn-secondary"
                         style={{ justifyContent: 'flex-start', width: '100%', color: 'var(--danger)', borderColor: 'transparent' }}
                     >
-                        <LogOut size={20} /> Cerrar Sesión
+                        <LogOut size={20} /> Cerrar Sesion
                     </button>
                 </div>
             </aside>
+
+            {showAccountModal && (
+                <UserAccountModal onClose={() => setShowAccountModal(false)} />
+            )}
 
             <style>{`
                 .sidebar {
