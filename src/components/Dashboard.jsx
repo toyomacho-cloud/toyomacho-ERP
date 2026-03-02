@@ -68,20 +68,22 @@ const ExchangeRateCards = () => {
             {/* BCV Card */}
             <div style={{
                 padding: '0.75rem 1rem',
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%)',
+                background: 'white',
                 borderRadius: 'var(--radius-md)',
-                border: '1px solid rgba(34, 197, 94, 0.3)',
-                minWidth: '140px'
+                border: '1px solid rgba(34, 197, 94, 0.4)',
+                borderLeft: '4px solid rgb(22, 163, 74)',
+                minWidth: '140px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
-                    <DollarSign size={14} style={{ color: 'rgb(34, 197, 94)' }} />
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>BCV</span>
+                    <DollarSign size={14} style={{ color: 'rgb(22, 163, 74)' }} />
+                    <span style={{ fontSize: '0.7rem', color: '#0f172a', fontWeight: 600 }}>BCV</span>
                 </div>
-                <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'rgb(34, 197, 94)' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'rgb(22, 163, 74)' }}>
                     Bs {bcvRate.toFixed(2)}
                 </div>
                 {lastUpdate && (
-                    <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.6rem', color: '#334155', marginTop: '0.25rem' }}>
                         ⟳ {getTimeSinceUpdate()}
                     </div>
                 )}
@@ -90,20 +92,22 @@ const ExchangeRateCards = () => {
             {/* USDT Card */}
             <div style={{
                 padding: '0.75rem 1rem',
-                background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.1) 0%, rgba(234, 179, 8, 0.05) 100%)',
+                background: 'white',
                 borderRadius: 'var(--radius-md)',
-                border: '1px solid rgba(234, 179, 8, 0.3)',
-                minWidth: '140px'
+                border: '1px solid rgba(234, 179, 8, 0.4)',
+                borderLeft: '4px solid rgb(202, 138, 4)',
+                minWidth: '140px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
-                    <TrendingUp size={14} style={{ color: 'rgb(234, 179, 8)' }} />
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>USDT</span>
+                    <TrendingUp size={14} style={{ color: 'rgb(202, 138, 4)' }} />
+                    <span style={{ fontSize: '0.7rem', color: '#0f172a', fontWeight: 600 }}>USDT</span>
                 </div>
-                <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'rgb(234, 179, 8)' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'rgb(202, 138, 4)' }}>
                     Bs {usdtRate.toFixed(2)}
                 </div>
                 {lastUpdate && (
-                    <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.6rem', color: '#334155', marginTop: '0.25rem' }}>
                         ⟳ {getTimeSinceUpdate()}
                     </div>
                 )}
