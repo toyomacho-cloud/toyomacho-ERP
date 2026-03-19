@@ -45,9 +45,17 @@ const MovementForm = () => {
             return;
         }
 
+        // Validacion: motivo obligatorio para ajustes
+        const isAjuste = formData.type.toLowerCase() === 'ajuste';
+        if (isAjuste && (!formData.reason || !formData.reason.trim())) {
+            setMessage({ type: 'error', text: 'El motivo es obligatorio para movimientos de tipo Ajuste.' });
+            return;
+        }
+
         setLoading(true);
         try {
-            const status = canApprove ? 'approved' : 'pending';
+            // Los ajustes SIEMPRE quedan pendientes para revision, sin importar el rol
+            const status = (canApprove && !isAjuste) ? 'approved' : 'pending';
 
             await addMovement({
                 ...formData,

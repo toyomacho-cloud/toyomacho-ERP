@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, RefreshCw, Plus } from 'lucide-react';
+import { X, Save, RefreshCw, Plus, Edit2, Trash2 } from 'lucide-react';
 import { supabase } from '../supabase';
 
 const ProductForm = ({
@@ -12,6 +12,8 @@ const ProductForm = ({
     addProduct,
     updateProduct,
     addBrand,
+    updateBrand,
+    deleteBrand,
     addCategory
 }) => {
     // Fallback: Extract unique brands from products if brands table is empty
@@ -56,6 +58,11 @@ const ProductForm = ({
 
     // Duplicate SKU detection
     const [isDuplicateSKU, setIsDuplicateSKU] = useState(false);
+
+    // Brand edit modal state
+    const [showEditBrandModal, setShowEditBrandModal] = useState(false);
+    const [editingBrand, setEditingBrand] = useState(null);
+    const [editBrandForm, setEditBrandForm] = useState({ name: '', code: '' });
 
     // Filter categories based on search term
     const filteredCategories = categorySearchTerm
@@ -194,6 +201,49 @@ const ProductForm = ({
             });
             setBrandForm({ name: '', code: '' });
             setShowBrandModal(false);
+        }
+    };
+
+    const handleEditBrand = (brand) => {
+        setEditingBrand(brand);
+        setEditBrandForm({ name: brand.name, code: brand.code || '' });
+        setShowEditBrandModal(true);
+    };
+
+    const handleEditBrandSubmit = async (e) => {
+        e.preventDefault();
+        if (!editBrandForm.name || !editBrandForm.code) return;
+        try {
+            await updateBrand(
+                editingBrand.id,
+                editingBrand.name,
+                editBrandForm.name,
+                editBrandForm.code.toUpperCase()
+            );
+            setShowEditBrandModal(false);
+            setEditingBrand(null);
+            // Actualizar formData si el producto usaba esa marca
+            if (formData.brand === editingBrand.name) {
+                setFormData(prev => ({ ...prev, brand: editBrandForm.name }));
+            }
+            alert('Marca actualizada exitosamente');
+        } catch (error) {
+            console.error('Error editando marca:', error);
+            alert('Error al actualizar la marca');
+        }
+    };
+
+    const handleDeleteBrand = async (brand) => {
+        if (!window.confirm(`¿Eliminar la marca "${brand.name}"? Se limpiara de los productos que la usen.`)) return;
+        try {
+            await deleteBrand(brand.id, brand.name);
+            if (formData.brand === brand.name) {
+                setFormData(prev => ({ ...prev, brand: '' }));
+            }
+            alert('Marca eliminada exitosamente');
+        } catch (error) {
+            console.error('Error eliminando marca:', error);
+            alert('Error al eliminar la marca');
         }
     };
 
@@ -415,20 +465,79 @@ const ProductForm = ({
                                         {filteredBrands.map(b => (
                                             <div
                                                 key={b.id}
-                                                onMouseDown={() => {
-                                                    setFormData({ ...formData, brand: b.name });
-                                                    setBrandSearchTerm('');
-                                                    setShowBrandDropdown(false);
-                                                }}
                                                 style={{
-                                                    padding: '0.75rem',
+                                                    padding: '0.5rem 0.75rem',
                                                     cursor: 'pointer',
-                                                    borderBottom: '1px solid var(--border-color)'
+                                                    borderBottom: '1px solid var(--border-color)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    gap: '0.5rem'
                                                 }}
-                                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.1)'}
-                                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                                onMouseEnter={(e) => {
+                                                    e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.1)';
+                                                    e.currentTarget.querySelector('.brand-actions').style.opacity = '1';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.currentTarget.style.background = 'transparent';
+                                                    e.currentTarget.querySelector('.brand-actions').style.opacity = '0';
+                                                }}
                                             >
-                                                {b.name}
+                                                <span
+                                                    onMouseDown={() => {
+                                                        setFormData({ ...formData, brand: b.name });
+                                                        setBrandSearchTerm('');
+                                                        setShowBrandDropdown(false);
+                                                    }}
+                                                    style={{ flex: 1, cursor: 'pointer' }}
+                                                >
+                                                    {b.name}
+                                                </span>
+                                                <div
+                                                    className="brand-actions"
+                                                    style={{
+                                                        display: 'flex',
+                                                        gap: '0.35rem',
+                                                        opacity: 1
+                                                    }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                            handleEditBrand(b);
+                                                        }}
+                                                        title="Editar marca"
+                                                        style={{
+                                                            background: 'rgba(0, 0, 0, 0.06)',
+                                                            border: '1px solid rgba(0, 0, 0, 0.15)',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            color: '#1e293b',
+                                                            padding: '0.25rem'
+                                                        }}
+                                                    >
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onMouseDown={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteBrand(b);
+                                                        }}
+                                                        title="Eliminar marca"
+                                                        style={{
+                                                            background: 'rgba(0, 0, 0, 0.06)',
+                                                            border: '1px solid rgba(0, 0, 0, 0.15)',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer',
+                                                            color: '#1e293b',
+                                                            padding: '0.25rem'
+                                                        }}
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
@@ -544,6 +653,44 @@ const ProductForm = ({
                             </div>
                             <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
                                 <button type="button" className="btn btn-secondary" onClick={() => setShowBrandModal(false)} style={{ flex: 1 }}>Cancelar</button>
+                                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Guardar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Brand Edit Modal */}
+            {showEditBrandModal && editingBrand && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 70
+                }}>
+                    <div className="glass-panel" style={{ padding: '2rem', borderRadius: 'var(--radius-lg)', width: '350px' }}>
+                        <h3 style={{ marginBottom: '1rem' }}>Editar Marca</h3>
+                        <form onSubmit={handleEditBrandSubmit}>
+                            <div style={{ marginBottom: '1rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Nombre</label>
+                                <input
+                                    required
+                                    type="text"
+                                    value={editBrandForm.name}
+                                    onChange={e => setEditBrandForm({ ...editBrandForm, name: e.target.value })}
+                                />
+                            </div>
+                            <div style={{ marginBottom: '1rem' }}>
+                                <label style={{ display: 'block', marginBottom: '0.5rem' }}>Codigo (3 Letras)</label>
+                                <input
+                                    required
+                                    type="text"
+                                    maxLength={3}
+                                    value={editBrandForm.code}
+                                    onChange={e => setEditBrandForm({ ...editBrandForm, code: e.target.value.toUpperCase() })}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                                <button type="button" className="btn btn-secondary" onClick={() => { setShowEditBrandModal(false); setEditingBrand(null); }} style={{ flex: 1 }}>Cancelar</button>
                                 <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Guardar</button>
                             </div>
                         </form>

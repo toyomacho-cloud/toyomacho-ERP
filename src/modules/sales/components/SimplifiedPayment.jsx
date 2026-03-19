@@ -53,7 +53,7 @@ const SimplifiedPayment = ({
                 textAlign: 'center'
             }}>
                 <h2 style={{ margin: '0 0 0.5rem 0', color: '#1e293b' }}>Total a Pagar</h2>
-                <div style={{ fontSize: '2.5rem', fontWeight: '800', color: 'var(--success)' }}>
+                <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#065f46' }}>
                     {formatearUSD(total)}
                 </div>
                 <div style={{ fontSize: '1.2rem', color: '#64748b' }}>
@@ -83,9 +83,9 @@ const SimplifiedPayment = ({
                         style={{
                             flex: 1,
                             padding: '1.5rem',
-                            border: tipoVenta === 'contado' ? '2px solid var(--success)' : '2px solid #e2e8f0',
+                            border: tipoVenta === 'contado' ? '2px solid #059669' : '2px solid #e2e8f0',
                             borderRadius: '12px',
-                            background: tipoVenta === 'contado' ? '#dcfce7' : 'white',
+                            background: tipoVenta === 'contado' ? '#ecfdf5' : 'white',
                             cursor: 'pointer',
                             display: 'flex',
                             flexDirection: 'column',
@@ -93,10 +93,10 @@ const SimplifiedPayment = ({
                             gap: '0.5rem'
                         }}
                     >
-                        <DollarSign size={32} color={tipoVenta === 'contado' ? '#16a34a' : '#94a3b8'} />
+                        <DollarSign size={32} color={tipoVenta === 'contado' ? '#059669' : '#94a3b8'} />
                         <span style={{
                             fontWeight: '600',
-                            color: tipoVenta === 'contado' ? '#16a34a' : '#64748b'
+                            color: tipoVenta === 'contado' ? '#059669' : '#64748b'
                         }}>
                             Contado
                         </span>
@@ -108,9 +108,9 @@ const SimplifiedPayment = ({
                         style={{
                             flex: 1,
                             padding: '1.5rem',
-                            border: tipoVenta === 'credito' ? '2px solid #f59e0b' : '2px solid #e2e8f0',
+                            border: tipoVenta === 'credito' ? '2px solid #b45309' : '2px solid #e2e8f0',
                             borderRadius: '12px',
-                            background: tipoVenta === 'credito' ? '#fef3c7' : 'white',
+                            background: tipoVenta === 'credito' ? '#fffbeb' : 'white',
                             cursor: 'pointer',
                             display: 'flex',
                             flexDirection: 'column',
@@ -118,10 +118,10 @@ const SimplifiedPayment = ({
                             gap: '0.5rem'
                         }}
                     >
-                        <Calendar size={32} color={tipoVenta === 'credito' ? '#f59e0b' : '#94a3b8'} />
+                        <Calendar size={32} color={tipoVenta === 'credito' ? '#b45309' : '#94a3b8'} />
                         <span style={{
                             fontWeight: '600',
-                            color: tipoVenta === 'credito' ? '#f59e0b' : '#64748b'
+                            color: tipoVenta === 'credito' ? '#b45309' : '#64748b'
                         }}>
                             Credito
                         </span>
@@ -142,12 +142,12 @@ const SimplifiedPayment = ({
                                     style={{
                                         flex: 1,
                                         padding: '0.75rem',
-                                        border: diasCredito === dias ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                                        border: diasCredito === dias ? '2px solid #b45309' : '1px solid #e2e8f0',
                                         borderRadius: '8px',
-                                        background: diasCredito === dias ? '#fef3c7' : 'white',
+                                        background: diasCredito === dias ? '#fffbeb' : 'white',
                                         cursor: 'pointer',
                                         fontWeight: diasCredito === dias ? '700' : '500',
-                                        color: diasCredito === dias ? '#f59e0b' : '#64748b'
+                                        color: diasCredito === dias ? '#b45309' : '#64748b'
                                     }}
                                 >
                                     {dias} dias

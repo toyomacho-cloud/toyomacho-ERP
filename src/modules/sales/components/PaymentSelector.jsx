@@ -19,9 +19,9 @@ import { formatearUSD, formatearBs } from '../utils/salesCalculations';
 
 // Modos de pago
 const MODOS_PAGO = {
-    divisas: { etiqueta: 'Divisas (USD)', icono: DollarSign, color: '#22c55e' },
-    bolivares: { etiqueta: 'Bolivares (Bs)', icono: Banknote, color: '#3b82f6' },
-    combinado: { etiqueta: 'Pago Combinado', icono: ArrowRightLeft, color: '#8b5cf6' }
+    divisas: { etiqueta: 'Divisas (USD)', icono: DollarSign, color: '#059669' },
+    bolivares: { etiqueta: 'Bolivares (Bs)', icono: Banknote, color: '#2563eb' },
+    combinado: { etiqueta: 'Pago Combinado', icono: ArrowRightLeft, color: '#7c3aed' }
 };
 
 // Metodos por modo
@@ -163,8 +163,8 @@ const PaymentSelector = ({
             {/* Paso 1: Monto en Divisas */}
             <div style={{
                 padding: '1.25rem',
-                background: 'rgba(34, 197, 94, 0.05)',
-                border: '2px solid rgba(34, 197, 94, 0.2)',
+                background: 'rgba(5, 150, 105, 0.04)',
+                border: '2px solid rgba(5, 150, 105, 0.15)',
                 borderRadius: 'var(--radius-md)'
             }}>
                 <div style={{
@@ -172,7 +172,7 @@ const PaymentSelector = ({
                     alignItems: 'center',
                     gap: '0.5rem',
                     marginBottom: '1rem',
-                    color: '#22c55e',
+                    color: '#059669',
                     fontWeight: '700'
                 }}>
                     <DollarSign size={20} />
@@ -190,7 +190,7 @@ const PaymentSelector = ({
                                 left: '0.75rem',
                                 top: '50%',
                                 transform: 'translateY(-50%)',
-                                color: '#22c55e',
+                                color: '#059669',
                                 fontWeight: 'bold'
                             }}>$</span>
                             <input
@@ -206,7 +206,7 @@ const PaymentSelector = ({
                                 style={{
                                     width: '100%',
                                     padding: '0.75rem 0.75rem 0.75rem 1.75rem',
-                                    border: '2px solid #22c55e',
+                                    border: '2px solid #059669',
                                     borderRadius: 'var(--radius-sm)',
                                     fontSize: '1.25rem',
                                     fontWeight: 'bold'
@@ -256,8 +256,8 @@ const PaymentSelector = ({
             {/* Paso 2: Restante en Bolivares */}
             <div style={{
                 padding: '1.25rem',
-                background: 'rgba(59, 130, 246, 0.05)',
-                border: '2px solid rgba(59, 130, 246, 0.2)',
+                background: 'rgba(37, 99, 235, 0.04)',
+                border: '2px solid rgba(37, 99, 235, 0.15)',
                 borderRadius: 'var(--radius-md)',
                 opacity: restanteEnBs > 0.01 ? 1 : 0.5
             }}>
@@ -266,7 +266,7 @@ const PaymentSelector = ({
                     alignItems: 'center',
                     gap: '0.5rem',
                     marginBottom: '1rem',
-                    color: '#3b82f6',
+                    color: '#2563eb',
                     fontWeight: '700'
                 }}>
                     <Banknote size={20} />
@@ -284,7 +284,7 @@ const PaymentSelector = ({
                             borderRadius: 'var(--radius-sm)',
                             fontSize: '1.25rem',
                             fontWeight: 'bold',
-                            color: '#3b82f6'
+                            color: '#2563eb'
                         }}>
                             {formatearBs(restanteEnBs)}
                         </div>
@@ -380,7 +380,7 @@ const PaymentSelector = ({
                                 gap: '0.5rem',
                                 justifyContent: 'flex-start',
                                 opacity: resumenPagos.completo ? 0.5 : 1,
-                                borderLeft: `4px solid ${esBs ? '#3b82f6' : '#22c55e'}`
+                                borderLeft: `4px solid ${esBs ? '#2563eb' : '#059669'}`
                             }}
                         >
                             <Icono size={18} />
@@ -390,8 +390,8 @@ const PaymentSelector = ({
                                 fontSize: '0.7rem',
                                 padding: '0.1rem 0.4rem',
                                 borderRadius: '10px',
-                                background: esBs ? 'rgba(59, 130, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)',
-                                color: esBs ? '#3b82f6' : '#22c55e'
+                                background: esBs ? 'rgba(37, 99, 235, 0.08)' : 'rgba(5, 150, 105, 0.08)',
+                                color: esBs ? '#2563eb' : '#059669'
                             }}>
                                 {esBs ? 'Bs' : 'USD'}
                             </span>
@@ -420,9 +420,9 @@ const PaymentSelector = ({
                                     key={indice}
                                     style={{
                                         padding: '1rem',
-                                        border: `1px solid ${esBs ? 'rgba(59, 130, 246, 0.3)' : 'rgba(34, 197, 94, 0.3)'}`,
+                                        border: `1px solid ${esBs ? 'rgba(37, 99, 235, 0.2)' : 'rgba(5, 150, 105, 0.2)'}`,
                                         borderRadius: 'var(--radius-md)',
-                                        background: esBs ? 'rgba(59, 130, 246, 0.05)' : 'rgba(34, 197, 94, 0.05)'
+                                        background: esBs ? 'rgba(37, 99, 235, 0.04)' : 'rgba(5, 150, 105, 0.04)'
                                     }}
                                 >
                                     <div style={{
@@ -443,7 +443,7 @@ const PaymentSelector = ({
                                                 fontSize: '0.7rem',
                                                 padding: '0.1rem 0.4rem',
                                                 borderRadius: '10px',
-                                                background: esBs ? '#3b82f6' : '#22c55e',
+                                                background: esBs ? '#2563eb' : '#059669',
                                                 color: 'white'
                                             }}>
                                                 {pago.moneda}
@@ -638,8 +638,8 @@ const PaymentSelector = ({
                             padding: '0.5rem 0',
                             borderBottom: '1px solid #e2e8f0'
                         }}>
-                            <span style={{ color: '#22c55e' }}>💵 En USD:</span>
-                            <span style={{ fontWeight: '600', color: '#22c55e' }}>
+                            <span style={{ color: '#059669' }}>💵 En USD:</span>
+                            <span style={{ fontWeight: '600', color: '#059669' }}>
                                 {formatearUSD(combinadoUSD)}
                             </span>
                         </div>
@@ -650,9 +650,9 @@ const PaymentSelector = ({
                                 padding: '0.5rem 0',
                                 borderBottom: '1px solid #e2e8f0'
                             }}>
-                                <span style={{ color: '#3b82f6' }}>🇻🇪 En Bs:</span>
+                                <span style={{ color: '#2563eb' }}>🇻🇪 En Bs:</span>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontWeight: '600', color: '#3b82f6' }}>
+                                    <div style={{ fontWeight: '600', color: '#2563eb' }}>
                                         {formatearBs(restanteEnBs)}
                                     </div>
                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
@@ -674,8 +674,8 @@ const PaymentSelector = ({
                                 padding: '0.5rem 0',
                                 borderBottom: '1px solid #e2e8f0'
                             }}>
-                                <span style={{ color: '#22c55e' }}>💵 Pagado USD:</span>
-                                <span style={{ fontWeight: '600', color: '#22c55e' }}>
+                                <span style={{ color: '#059669' }}>💵 Pagado USD:</span>
+                                <span style={{ fontWeight: '600', color: '#059669' }}>
                                     {formatearUSD(resumenPagos.totalUSD)}
                                 </span>
                             </div>
@@ -687,9 +687,9 @@ const PaymentSelector = ({
                                 padding: '0.5rem 0',
                                 borderBottom: '1px solid #e2e8f0'
                             }}>
-                                <span style={{ color: '#3b82f6' }}>🇻🇪 Pagado Bs:</span>
+                                <span style={{ color: '#2563eb' }}>🇻🇪 Pagado Bs:</span>
                                 <div style={{ textAlign: 'right' }}>
-                                    <div style={{ fontWeight: '600', color: '#3b82f6' }}>
+                                    <div style={{ fontWeight: '600', color: '#2563eb' }}>
                                         {formatearBs(resumenPagos.totalBsPagado)}
                                     </div>
                                     <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
@@ -707,10 +707,10 @@ const PaymentSelector = ({
                     justifyContent: 'space-between',
                     marginBottom: '1rem',
                     padding: '0.75rem',
-                    background: resumenPagos.completo ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                    background: resumenPagos.completo ? 'rgba(5, 150, 105, 0.08)' : 'rgba(180, 83, 9, 0.08)',
                     borderRadius: 'var(--radius-sm)',
                     fontWeight: 'bold',
-                    color: resumenPagos.completo ? 'var(--success)' : 'var(--warning)'
+                    color: resumenPagos.completo ? '#059669' : '#b45309'
                 }}>
                     <span>Restante:</span>
                     <div style={{ textAlign: 'right' }}>
@@ -724,13 +724,13 @@ const PaymentSelector = ({
                 {resumenPagos.completo && (
                     <div style={{
                         padding: '0.75rem',
-                        background: 'rgba(16, 185, 129, 0.15)',
+                        background: 'rgba(5, 150, 105, 0.1)',
                         borderRadius: 'var(--radius-sm)',
                         textAlign: 'center',
-                        color: 'var(--success)',
+                        color: '#059669',
                         fontWeight: '700',
                         marginBottom: '1rem',
-                        border: '1px solid rgba(16, 185, 129, 0.3)'
+                        border: '1px solid rgba(5, 150, 105, 0.2)'
                     }}>
                         ✓ PAGO COMPLETO
                     </div>

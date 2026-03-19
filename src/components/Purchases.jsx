@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Save, FileText, Plus, Edit2, UserPlus, Trash2, CheckCircle, Tag } from 'lucide-react';
+﻿import React, { useState, useEffect, useRef } from 'react';
+import { ShoppingCart, Save, FileText, Plus, Edit2, UserPlus, Trash2, CheckCircle, Tag, Search, X, Eye, ChevronLeft, Calendar, ChevronRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useInventoryContext } from '../context/InventoryContext';
@@ -8,7 +8,7 @@ import ProductForm from './ProductForm';
 import LabelGenerator from './LabelGenerator';
 
 const Purchases = () => {
-    const { products, purchases, providers, brands, categories, addPurchase, addProvider, updateProvider, deletePurchasesByDate, addProduct, updateProduct, addBrand, addCategory } = useInventoryContext();
+    const { products, purchases, providers, brands, categories, addPurchase, addProvider, updateProvider, deletePurchasesByDate, addProduct, updateProduct, addBrand, updateBrand, deleteBrand, addCategory } = useInventoryContext();
     const { userProfile } = useAuth();
 
     // Header State
@@ -30,8 +30,20 @@ const Purchases = () => {
     const [productSearchTerm, setProductSearchTerm] = useState('');
     const [selectedProductObj, setSelectedProductObj] = useState(null);
 
+    // Tab State
+    const [activeView, setActiveView] = useState('register');
+
     // History State
     const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
+    const [historySearchInvoice, setHistorySearchInvoice] = useState('');
+    const [historySearchProvider, setHistorySearchProvider] = useState('');
+
+    // Documents Tab State
+    const [docDateFrom, setDocDateFrom] = useState('');
+    const [docDateTo, setDocDateTo] = useState('');
+    const [docSearchNumber, setDocSearchNumber] = useState('');
+    const [docSearchProvider, setDocSearchProvider] = useState('');
+    const [selectedDocument, setSelectedDocument] = useState(null);
 
     // Cart State
     const [cart, setCart] = useState([]);
@@ -39,6 +51,11 @@ const Purchases = () => {
     const [providerForm, setProviderForm] = useState({ name: '', contact: '' });
     const [showProviderModal, setShowProviderModal] = useState(false);
     const [editingProvider, setEditingProvider] = useState(null);
+
+    // Provider Search State (Autocomplete)
+    const [providerSearchTerm, setProviderSearchTerm] = useState('');
+    const [showProviderDropdown, setShowProviderDropdown] = useState(false);
+    const providerDropdownRef = useRef(null);
 
     // Product Modal State
     const [showProductModal, setShowProductModal] = useState(false);
@@ -49,6 +66,36 @@ const Purchases = () => {
 
     const selectedProduct = selectedProductObj || products.find(p => p.id === parseInt(itemData.productId));
     const selectedProvider = providers.find(p => String(p.id) === String(headerData.providerId));
+
+    // Filter providers based on search term
+    const filteredProviders = providerSearchTerm
+        ? providers.filter(p => (p.name || '').toLowerCase().includes(providerSearchTerm.toLowerCase()))
+        : providers;
+
+    // Handle provider selection from autocomplete
+    const handleSelectProviderFromSearch = (provider) => {
+        setHeaderData({ ...headerData, providerId: provider.id });
+        setProviderSearchTerm(provider.name);
+        setShowProviderDropdown(false);
+    };
+
+    // Close provider dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (providerDropdownRef.current && !providerDropdownRef.current.contains(event.target)) {
+                setShowProviderDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Sync provider search term when provider is selected externally (e.g. after edit)
+    useEffect(() => {
+        if (selectedProvider && providerSearchTerm !== selectedProvider.name) {
+            setProviderSearchTerm(selectedProvider.name);
+        }
+    }, [selectedProvider]);
 
     // Filter products based on search term - only when search term exists
     const filteredProducts = productSearchTerm ? products.filter(p => {
@@ -107,7 +154,7 @@ const Purchases = () => {
             return;
         }
         if (!selectedProvider) {
-            alert('Proveedor no encontrado. Por favor seleccione un proveedor válido.');
+            alert('Proveedor no encontrado. Por favor seleccione un proveedor vÃ¡lido.');
             return;
         }
 
@@ -116,6 +163,7 @@ const Purchases = () => {
                 providerId: headerData.providerId,
                 providerName: selectedProvider.name,
                 invoiceNumber: headerData.invoiceNumber,
+                documentType: headerData.documentType || 'factura',
                 productId: String(item.productId), // Ensure string
                 productName: item.productName,
                 productSku: item.productSku,
@@ -132,7 +180,7 @@ const Purchases = () => {
             await addPurchase(purchaseBatch, userName);
 
             // Option 1: Auto-prompt for label generation
-            const generateLabels = window.confirm('✅ Compra registrada exitosamente.\n\n¿Desea generar etiquetas para estos productos?');
+            const generateLabels = window.confirm('âœ… Compra registrada exitosamente.\n\nÂ¿Desea generar etiquetas para estos productos?');
 
             if (generateLabels) {
                 setShowLabelGenerator(true);
@@ -150,19 +198,19 @@ const Purchases = () => {
         e.preventDefault();
         try {
             if (editingProvider) {
-                console.log('📝 Updating provider:', editingProvider.id, providerForm);
+                console.log('ðŸ“ Updating provider:', editingProvider.id, providerForm);
                 await updateProvider(editingProvider.id, providerForm);
-                console.log('✅ Provider updated successfully');
+                console.log('âœ… Provider updated successfully');
             } else {
-                console.log('➕ Adding new provider:', providerForm);
+                console.log('âž• Adding new provider:', providerForm);
                 await addProvider(providerForm);
-                console.log('✅ Provider added successfully');
+                console.log('âœ… Provider added successfully');
             }
             setProviderForm({ name: '', contact: '' });
             setEditingProvider(null);
             setShowProviderModal(false);
         } catch (error) {
-            console.error('❌ Error en proveedor:', error);
+            console.error('âŒ Error en proveedor:', error);
             alert(`Error al ${editingProvider ? 'actualizar' : 'crear'} proveedor: ${error.message}`);
         }
     };
@@ -194,28 +242,69 @@ const Purchases = () => {
         setShowLabelGenerator(true);
     };
 
+    // Helper: filtrar compras segun los filtros activos del historial
+    const getFilteredPurchases = () => {
+        const hasSearch = historySearchInvoice.trim() || historySearchProvider.trim();
+        let filtered = purchases;
+
+        // Si hay busqueda activa, ignorar filtro de fecha
+        if (!hasSearch) {
+            filtered = filtered.filter(p => (p.date || '').startsWith(historyDate));
+        }
+
+        // Filtro por factura/nota de entrega
+        if (historySearchInvoice.trim()) {
+            const term = historySearchInvoice.trim().toLowerCase();
+            filtered = filtered.filter(p => {
+                const inv = (p.invoice_number || p.invoiceNumber || '').toLowerCase();
+                return inv.includes(term);
+            });
+        }
+
+        // Filtro por proveedor
+        if (historySearchProvider.trim()) {
+            const term = historySearchProvider.trim().toLowerCase();
+            filtered = filtered.filter(p => {
+                const prov = (p.provider_name || p.providerName || '').toLowerCase();
+                return prov.includes(term);
+            });
+        }
+
+        return filtered;
+    };
+
     const generatePDF = async () => {
         const doc = new jsPDF();
+        const hasSearch = historySearchInvoice.trim() || historySearchProvider.trim();
         const reportDate = new Date(historyDate).toLocaleDateString('es-VE', { timeZone: 'UTC' });
 
-        // Filter purchases for selected date
-        const dailyPurchases = purchases.filter(purchase => (purchase.date || '').startsWith(historyDate));
+        // Usar la misma logica de filtrado del historial
+        const filteredPurchases = getFilteredPurchases();
 
-        if (dailyPurchases.length === 0) {
-            alert('No hay compras registradas para la fecha seleccionada.');
+        if (filteredPurchases.length === 0) {
+            alert('No hay compras registradas para los filtros seleccionados.');
             return;
         }
 
         // Title
         doc.setFontSize(18);
-        doc.text(`Reporte de Compras - ${reportDate}`, 14, 22);
+        let title = `Reporte de Compras`;
+        if (hasSearch) {
+            const parts = [];
+            if (historySearchInvoice.trim()) parts.push(`Factura: ${historySearchInvoice.trim()}`);
+            if (historySearchProvider.trim()) parts.push(`Proveedor: ${historySearchProvider.trim()}`);
+            title += ` - ${parts.join(' | ')}`;
+        } else {
+            title += ` - ${reportDate}`;
+        }
+        doc.text(title, 14, 22);
 
         // Table Data
         const tableColumn = ["Fecha", "Proveedor", "Factura", "Producto", "Ref", "Cant.", "Total (USD)"];
         const tableRows = [];
         let totalAmount = 0;
 
-        dailyPurchases.forEach(purchase => {
+        filteredPurchases.forEach(purchase => {
             const providerName = purchase.provider_name || purchase.providerName || 'N/A';
             const invoiceNumber = purchase.invoice_number || purchase.invoiceNumber || 'N/A';
             const items = purchase.items || [];
@@ -270,15 +359,146 @@ const Purchases = () => {
             }
         });
 
-        doc.save(`reporte_compras_${historyDate}.pdf`);
+        const filename = hasSearch ? `reporte_compras_busqueda` : `reporte_compras_${historyDate}`;
+        doc.save(`${filename}.pdf`);
 
-        // Delete purchases and revert inventory for the date
-        await deletePurchasesByDate(historyDate);
-
-        alert('Reporte generado y registros limpiados exitosamente.');
+        // Solo limpiar registros cuando se filtra por fecha (no en busqueda)
+        if (!hasSearch) {
+            await deletePurchasesByDate(historyDate);
+            alert('Reporte generado y registros limpiados exitosamente.');
+        } else {
+            alert('Reporte generado exitosamente.');
+        }
     };
 
     const cartTotal = cart.reduce((acc, item) => acc + item.total, 0);
+
+    // ========== DOCUMENTOS TAB: Logica ==========
+    // Agrupar compras por numero de documento
+    const getGroupedDocuments = () => {
+        let filtered = [...purchases];
+
+        // Filtro por rango de fechas
+        if (docDateFrom) {
+            filtered = filtered.filter(p => (p.date || '') >= docDateFrom);
+        }
+        if (docDateTo) {
+            filtered = filtered.filter(p => (p.date || '').substring(0, 10) <= docDateTo);
+        }
+
+        // Filtro por numero de documento
+        if (docSearchNumber.trim()) {
+            const term = docSearchNumber.trim().toLowerCase();
+            filtered = filtered.filter(p => {
+                const inv = (p.invoice_number || p.invoiceNumber || '').toLowerCase();
+                return inv.includes(term);
+            });
+        }
+
+        // Filtro por proveedor
+        if (docSearchProvider.trim()) {
+            const term = docSearchProvider.trim().toLowerCase();
+            filtered = filtered.filter(p => {
+                const prov = (p.provider_name || p.providerName || '').toLowerCase();
+                return prov.includes(term);
+            });
+        }
+
+        // Agrupar por invoice_number
+        const grouped = {};
+        filtered.forEach(purchase => {
+            const invNum = purchase.invoice_number || purchase.invoiceNumber || 'SIN-NUMERO';
+            if (!grouped[invNum]) {
+                grouped[invNum] = {
+                    invoiceNumber: invNum,
+                    providerName: purchase.provider_name || purchase.providerName || 'N/A',
+                    date: purchase.date,
+                    documentType: (invNum.toUpperCase().startsWith('NE') || invNum.toUpperCase().startsWith('N-')) ? 'Nota de Entrega' : 'Factura',
+                    items: [],
+                    total: 0,
+                    purchaseIds: []
+                };
+            }
+            grouped[invNum].purchaseIds.push(purchase.id);
+            const items = purchase.items || [];
+            if (items.length > 0) {
+                items.forEach(item => {
+                    grouped[invNum].items.push({
+                        productName: item.productName || 'N/A',
+                        productReference: item.productReference || item.productSku || 'N/A',
+                        productSku: item.productSku || 'N/A',
+                        quantity: item.quantity || 0,
+                        unit: item.unit || 'Pza',
+                        cost: parseFloat(item.cost) || 0,
+                        total: parseFloat(item.total) || 0
+                    });
+                    grouped[invNum].total += parseFloat(item.total) || 0;
+                });
+            } else {
+                grouped[invNum].items.push({
+                    productName: purchase.productName || 'N/A',
+                    productReference: purchase.productReference || 'N/A',
+                    productSku: purchase.productSku || 'N/A',
+                    quantity: purchase.quantity || 0,
+                    unit: purchase.unit || 'Pza',
+                    cost: parseFloat(purchase.cost) || 0,
+                    total: parseFloat(purchase.total) || 0
+                });
+                grouped[invNum].total += parseFloat(purchase.total) || 0;
+            }
+        });
+
+        return Object.values(grouped).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    };
+
+    // PDF de documento individual
+    const generateDocumentPDF = (doc) => {
+        const pdf = new jsPDF();
+        const reportDate = new Date(doc.date).toLocaleDateString('es-VE', { timeZone: 'UTC' });
+
+        pdf.setFontSize(16);
+        pdf.text(`${doc.documentType}: ${doc.invoiceNumber}`, 14, 20);
+        pdf.setFontSize(10);
+        pdf.text(`Proveedor: ${doc.providerName}`, 14, 28);
+        pdf.text(`Fecha: ${reportDate}`, 14, 34);
+
+        const tableColumn = ['Producto', 'Referencia', 'Cantidad', 'Unidad', 'Costo U.', 'Total'];
+        const tableRows = doc.items.map(item => [
+            item.productName,
+            item.productReference,
+            item.quantity,
+            item.unit,
+            `$${item.cost.toFixed(2)}`,
+            `$${item.total.toFixed(2)}`
+        ]);
+
+        tableRows.push([
+            '', '', '', '',
+            { content: 'TOTAL:', styles: { fontStyle: 'bold', halign: 'right' } },
+            { content: `$${doc.total.toFixed(2)}`, styles: { fontStyle: 'bold' } }
+        ]);
+
+        autoTable(pdf, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 40,
+            theme: 'grid',
+            headStyles: { fillColor: [66, 66, 66] },
+            styles: { fontSize: 8 },
+            columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } }
+        });
+
+        pdf.save(`${doc.documentType.replace(/ /g, '_')}_${doc.invoiceNumber}.pdf`);
+    };
+
+    const clearDocFilters = () => {
+        setDocDateFrom('');
+        setDocDateTo('');
+        setDocSearchNumber('');
+        setDocSearchProvider('');
+    };
+
+    const hasDocFilters = docDateFrom || docDateTo || docSearchNumber.trim() || docSearchProvider.trim();
 
     return (
         <div className="animate-fade-in">
@@ -289,11 +509,7 @@ const Purchases = () => {
                 </div>
                 <button
                     className="btn btn-primary"
-                    onClick={() => {
-                        console.log('🔘 Botón Generar Etiquetas clickeado');
-                        setShowLabelGenerator(true);
-                        console.log('🔘 showLabelGenerator ahora es true');
-                    }}
+                    onClick={() => setShowLabelGenerator(true)}
                     style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 >
                     <Tag size={20} />
@@ -308,23 +524,69 @@ const Purchases = () => {
                     <h3 style={{ marginBottom: '1.5rem' }}>1. Datos de Compra</h3>
 
                     {/* Header Fields */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-                        <div>
+                    <div style={{ marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-color)' }}>
+                        {/* Proveedor - full width */}
+                        <div style={{ marginBottom: '1rem' }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
                                 Proveedor
                                 <Edit2 size={14} style={{ color: 'var(--accent-primary)', cursor: 'pointer' }} title="Campo editable" />
                             </label>
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <select
-                                    value={headerData.providerId}
-                                    onChange={(e) => setHeaderData({ ...headerData, providerId: e.target.value })}
-                                    style={{ width: '100%' }}
-                                >
-                                    <option value="">Seleccionar...</option>
-                                    {providers.map(p => (
-                                        <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                </select>
+                            <div style={{ display: 'flex', gap: '0.5rem' }} ref={providerDropdownRef}>
+                                <div style={{ position: 'relative', flex: 1 }}>
+                                    <input
+                                        type="text"
+                                        value={providerSearchTerm}
+                                        onChange={(e) => {
+                                            setProviderSearchTerm(e.target.value);
+                                            setShowProviderDropdown(true);
+                                            if (!e.target.value) {
+                                                setHeaderData({ ...headerData, providerId: '' });
+                                            }
+                                        }}
+                                        onFocus={() => setShowProviderDropdown(true)}
+                                        placeholder="Buscar proveedor..."
+                                        style={{ width: '100%' }}
+                                    />
+                                    {showProviderDropdown && filteredProviders.length > 0 && (
+                                        <div style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: 0,
+                                            right: 0,
+                                            minWidth: '350px',
+                                            background: 'var(--bg-secondary)',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: 'var(--radius-md)',
+                                            maxHeight: '250px',
+                                            overflowY: 'auto',
+                                            zIndex: 10,
+                                            marginTop: '0.25rem',
+                                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                                        }}>
+                                            {filteredProviders.map(p => (
+                                                <div
+                                                    key={p.id}
+                                                    onClick={() => handleSelectProviderFromSearch(p)}
+                                                    style={{
+                                                        padding: '0.75rem',
+                                                        cursor: 'pointer',
+                                                        borderBottom: '1px solid var(--border-color)',
+                                                        background: String(p.id) === String(headerData.providerId) ? 'rgba(var(--primary-rgb), 0.15)' : 'transparent'
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.1)'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.background = String(p.id) === String(headerData.providerId) ? 'rgba(var(--primary-rgb), 0.15)' : 'transparent'}
+                                                >
+                                                    <div style={{ fontWeight: '500' }}>{p.name}</div>
+                                                    {p.contact && (
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                                            Contacto: {p.contact}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                                 <button
                                     type="button"
                                     className="btn btn-secondary"
@@ -339,32 +601,35 @@ const Purchases = () => {
                                 </button>
                             </div>
                         </div>
-                        <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <select
-                                    value={headerData.documentType}
-                                    onChange={(e) => setHeaderData({ ...headerData, documentType: e.target.value })}
-                                    style={{
-                                        width: 'auto',
-                                        padding: '0.25rem 0.5rem',
-                                        fontSize: '0.875rem',
-                                        background: 'transparent',
-                                        border: '1px solid var(--border-color)',
-                                        borderRadius: 'var(--radius-sm)',
-                                        color: 'var(--text-primary)',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    <option value="factura">No. Factura</option>
-                                    <option value="nota">Nota de Entrega</option>
-                                </select>
+                        {/* Factura / Nota - row */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <select
+                                        value={headerData.documentType}
+                                        onChange={(e) => setHeaderData({ ...headerData, documentType: e.target.value })}
+                                        style={{
+                                            width: 'auto',
+                                            padding: '0.25rem 0.5rem',
+                                            fontSize: '0.875rem',
+                                            background: 'transparent',
+                                            border: '1px solid var(--border-color)',
+                                            borderRadius: 'var(--radius-sm)',
+                                            color: 'var(--text-primary)',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        <option value="factura">No. Factura</option>
+                                        <option value="nota">Nota de Entrega</option>
+                                    </select>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={headerData.invoiceNumber}
+                                    onChange={(e) => setHeaderData({ ...headerData, invoiceNumber: e.target.value })}
+                                    placeholder={headerData.documentType === 'factura' ? 'F-12345' : 'NE-12345'}
+                                />
                             </div>
-                            <input
-                                type="text"
-                                value={headerData.invoiceNumber}
-                                onChange={(e) => setHeaderData({ ...headerData, invoiceNumber: e.target.value })}
-                                placeholder={headerData.documentType === 'factura' ? 'F-12345' : 'NE-12345'}
-                            />
                         </div>
                     </div>
 
@@ -383,7 +648,7 @@ const Purchases = () => {
                                 type="text"
                                 value={productSearchTerm}
                                 onChange={(e) => setProductSearchTerm(e.target.value)}
-                                placeholder="Buscar por descripción, SKU o referencia..."
+                                placeholder="Buscar por descripciÃ³n, SKU o referencia..."
                             />
                             {productSearchTerm && filteredProducts.length > 0 && (
                                 <div style={{
@@ -413,7 +678,7 @@ const Purchases = () => {
                                         >
                                             <div style={{ fontWeight: '500' }}>{product.description}</div>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                                Marca: {product.brand || 'N/A'} | Ref: {product.reference || 'N/A'} | Ubicación: {product.location || 'N/A'} | Stock: {product.quantity}
+                                                Marca: {product.brand || 'N/A'} | Ref: {product.reference || 'N/A'} | UbicaciÃ³n: {product.location || 'N/A'} | Stock: {product.quantity}
                                             </div>
                                         </div>
                                     ))}
@@ -435,7 +700,7 @@ const Purchases = () => {
                                 <div>
                                     <div style={{ fontWeight: '500', marginBottom: '0.5rem' }}>{selectedProduct.description}</div>
                                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                        <div>Ref: {selectedProduct.reference} | Ubicación: {selectedProduct.location || 'N/A'}</div>
+                                        <div>Ref: {selectedProduct.reference} | UbicaciÃ³n: {selectedProduct.location || 'N/A'}</div>
                                         <div>Stock disponible: {selectedProduct.quantity}</div>
                                     </div>
                                 </div>
@@ -519,7 +784,7 @@ const Purchases = () => {
                             </table>
                         ) : (
                             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                                Lista vacía
+                                Lista vacÃ­a
                             </div>
                         )}
                     </div>
@@ -539,112 +804,247 @@ const Purchases = () => {
                 </div>
             </div>
 
-            {/* History Section - Sales Style */}
+            {/* Historial - Vista unificada agrupada por documento */}
             <div className="glass-panel" style={{ padding: '2rem', borderRadius: 'var(--radius-lg)', marginTop: '2rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <h3 style={{ margin: 0 }}>Historial de Compras</h3>
-                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <button
+                        onClick={generatePDF}
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}
+                    >
+                        <FileText size={16} /> Generar Reporte PDF
+                    </button>
+                </div>
+
+                {/* Filtros de busqueda */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr',
+                    gap: '0.75rem',
+                    marginBottom: '1.5rem',
+                    padding: '1rem',
+                    background: 'rgba(var(--primary-rgb), 0.03)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)'
+                }}>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                            <Calendar size={12} style={{ marginRight: '0.25rem', verticalAlign: 'middle' }} /> Fecha
+                        </label>
                         <input
                             type="date"
                             value={historyDate}
                             onChange={(e) => setHistoryDate(e.target.value)}
-                            style={{ padding: '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}
+                            disabled={!!(historySearchInvoice.trim() || historySearchProvider.trim())}
+                            style={{
+                                width: '100%', padding: '0.5rem',
+                                borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)',
+                                opacity: (historySearchInvoice.trim() || historySearchProvider.trim()) ? 0.5 : 1
+                            }}
                         />
-                        <button
-                            onClick={generatePDF}
-                            className="btn btn-secondary"
-                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}
-                        >
-                            <FileText size={16} /> Generar Reporte PDF
-                        </button>
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                            <Search size={12} style={{ marginRight: '0.25rem', verticalAlign: 'middle' }} /> Factura / Nota de Entrega
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                            <input
+                                type="text"
+                                value={historySearchInvoice}
+                                onChange={(e) => setHistorySearchInvoice(e.target.value)}
+                                placeholder="Ej: F-12345, NE-001..."
+                                style={{ width: '100%', padding: '0.5rem', paddingRight: historySearchInvoice ? '2rem' : '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}
+                            />
+                            {historySearchInvoice && (
+                                <button onClick={() => setHistorySearchInvoice('')} style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.15rem', display: 'flex' }}>
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                            <Search size={12} style={{ marginRight: '0.25rem', verticalAlign: 'middle' }} /> Proveedor
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                            <input
+                                type="text"
+                                value={historySearchProvider}
+                                onChange={(e) => setHistorySearchProvider(e.target.value)}
+                                placeholder="Nombre del proveedor..."
+                                style={{ width: '100%', padding: '0.5rem', paddingRight: historySearchProvider ? '2rem' : '0.5rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}
+                            />
+                            {historySearchProvider && (
+                                <button onClick={() => setHistorySearchProvider('')} style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '0.15rem', display: 'flex' }}>
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
 
+                {/* Indicador de busqueda activa */}
+                {(historySearchInvoice.trim() || historySearchProvider.trim()) && (
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem',
+                        padding: '0.5rem 0.75rem', background: 'rgba(var(--primary-rgb), 0.08)',
+                        borderRadius: 'var(--radius-sm)', fontSize: '0.8rem', color: 'var(--accent-primary)'
+                    }}>
+                        <Search size={14} />
+                        <span>Buscando en todo el historial</span>
+                        <button
+                            onClick={() => { setHistorySearchInvoice(''); setHistorySearchProvider(''); }}
+                            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-primary)', fontSize: '0.8rem', textDecoration: 'underline' }}
+                        >
+                            Limpiar filtros
+                        </button>
+                    </div>
+                )}
+
+                {/* Listado de documentos */}
                 {(() => {
-                    const dailyPurchases = historyDate ? purchases.filter(p => (p.date || '').startsWith(historyDate)) : [];
-                    const dailyTotal = dailyPurchases.reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
+                    const filteredPurchases = getFilteredPurchases();
+                    const hasSearch = historySearchInvoice.trim() || historySearchProvider.trim();
 
-                    // Aplanar items para mostrar cada producto como fila separada
-                    const flattenedRows = [];
-                    dailyPurchases.forEach(purchase => {
-                        const items = purchase.items || [];
-                        if (items.length > 0) {
-                            items.forEach((item, idx) => {
-                                flattenedRows.push({
-                                    id: `${purchase.id}-${idx}`,
-                                    date: purchase.date,
-                                    providerName: purchase.provider_name || purchase.providerName || 'N/A',
-                                    invoiceNumber: purchase.invoice_number || purchase.invoiceNumber || 'N/A',
-                                    productName: item.productName || 'N/A',
-                                    productReference: item.productReference || item.productSku || 'N/A',
-                                    quantity: item.quantity || 0,
-                                    unit: item.unit || 'Pza',
-                                    total: parseFloat(item.total) || 0
-                                });
-                            });
-                        } else {
-                            // Estructura antigua sin items JSONB
-                            flattenedRows.push({
-                                id: purchase.id,
-                                date: purchase.date,
-                                providerName: purchase.provider_name || purchase.providerName || 'N/A',
-                                invoiceNumber: purchase.invoice_number || purchase.invoiceNumber || 'N/A',
-                                productName: purchase.productName || 'N/A',
-                                productReference: purchase.productReference || 'N/A',
-                                quantity: purchase.quantity || 0,
-                                unit: purchase.unit || 'Pza',
-                                total: parseFloat(purchase.total) || 0
-                            });
-                        }
-                    });
+                    // Los purchases ya vienen como headers con items[] desde el hook
+                    const documents = filteredPurchases.map(purchase => ({
+                        id: purchase.id,
+                        invoiceNumber: purchase.invoice_number || 'SIN-NUMERO',
+                        providerName: purchase.provider_name || 'N/A',
+                        date: purchase.date,
+                        documentType: purchase.document_type === 'nota_entrega' ? 'Nota de Entrega' : 'Factura',
+                        items: (purchase.items || []).map(item => ({
+                            productName: item.productName || 'N/A',
+                            productReference: item.productReference || item.productSku || 'N/A',
+                            quantity: item.quantity || 0,
+                            unit: item.unit || 'Pza',
+                            cost: parseFloat(item.cost || item.unitCost) || 0,
+                            total: parseFloat(item.total) || 0
+                        })),
+                        total: parseFloat(purchase.total) || 0
+                    }));
 
-                    return flattenedRows.length === 0 ? (
+                    const grandTotal = documents.reduce((sum, d) => sum + d.total, 0);
+
+                    return documents.length === 0 ? (
                         <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>
-                            No hay registros para la fecha seleccionada
+                            {hasSearch ? 'No se encontraron resultados para la busqueda' : 'No hay registros para la fecha seleccionada'}
                         </p>
                     ) : (
                         <>
-                            <div style={{ overflowX: 'auto' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '2px solid var(--border-color)' }}>
-                                        <tr>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Fecha</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Proveedor</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Factura</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Producto</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'left', color: 'var(--text-secondary)' }}>Ref.</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Cant.</th>
-                                            <th style={{ padding: '0.75rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Total</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {flattenedRows.map((p) => (
-                                            <tr key={p.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                                <td style={{ padding: '0.75rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-                                                    {new Date(p.date).toLocaleDateString()}
-                                                </td>
-                                                <td style={{ padding: '0.75rem' }}>{p.providerName}</td>
-                                                <td style={{ padding: '0.75rem', fontFamily: 'monospace', fontSize: '0.75rem' }}>{p.invoiceNumber}</td>
-                                                <td style={{ padding: '0.75rem' }}>{p.productName}</td>
-                                                <td style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{p.productReference || 'N/A'}</td>
-                                                <td style={{ padding: '0.75rem', textAlign: 'center' }}>{p.quantity} {p.unit}</td>
-                                                <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 'bold', color: 'var(--success)' }}>
-                                                    ${p.total.toFixed(2)}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    <tfoot>
-                                        <tr style={{ borderTop: '2px solid var(--border-color)', background: 'rgba(var(--success-rgb), 0.1)' }}>
-                                            <td colSpan="6" style={{ padding: '1rem', textAlign: 'right', fontWeight: 'bold' }}>
-                                                TOTAL DEL DÍA:
-                                            </td>
-                                            <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--success)' }}>
-                                                ${dailyTotal.toFixed(2)}
-                                            </td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
+                            <div style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                {documents.length} documento{documents.length !== 1 ? 's' : ''} encontrado{documents.length !== 1 ? 's' : ''}
+                            </div>
+
+                            {documents.map((doc) => {
+                                const isExpanded = selectedDocument && selectedDocument.invoiceNumber === doc.invoiceNumber;
+                                return (
+                                    <div key={doc.invoiceNumber} style={{
+                                        marginBottom: '0.75rem',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 'var(--radius-md)',
+                                        overflow: 'hidden',
+                                        background: isExpanded ? 'rgba(var(--primary-rgb), 0.03)' : 'transparent'
+                                    }}>
+                                        {/* Fila del documento - clickeable */}
+                                        <div
+                                            onClick={() => setSelectedDocument(isExpanded ? null : doc)}
+                                            style={{
+                                                display: 'grid',
+                                                gridTemplateColumns: '100px 110px 1fr 1fr 80px 100px 60px',
+                                                gap: '0.5rem',
+                                                padding: '0.75rem 1rem',
+                                                cursor: 'pointer',
+                                                alignItems: 'center',
+                                                fontSize: '0.875rem',
+                                                transition: 'background 0.15s'
+                                            }}
+                                            onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(var(--primary-rgb), 0.04)'; }}
+                                            onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
+                                        >
+                                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                                                {new Date(doc.date).toLocaleDateString('es-VE', { timeZone: 'UTC' })}
+                                            </span>
+                                            <span>
+                                                <span style={{
+                                                    padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '500',
+                                                    background: doc.documentType === 'Factura' ? 'rgba(59,130,246,0.15)' : 'rgba(234,179,8,0.15)',
+                                                    color: doc.documentType === 'Factura' ? '#3b82f6' : '#ca8a04'
+                                                }}>
+                                                    {doc.documentType}
+                                                </span>
+                                            </span>
+                                            <span style={{ fontFamily: 'monospace', fontWeight: '500' }}>{doc.invoiceNumber}</span>
+                                            <span>{doc.providerName}</span>
+                                            <span style={{ textAlign: 'center' }}>
+                                                <span style={{ background: 'rgba(var(--primary-rgb), 0.1)', padding: '0.1rem 0.4rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem' }}>
+                                                    {doc.items.length} prod.
+                                                </span>
+                                            </span>
+                                            <span style={{ textAlign: 'right', fontWeight: 'bold', color: 'var(--success)' }}>${doc.total.toFixed(2)}</span>
+                                            <span style={{ textAlign: 'center', color: 'var(--accent-primary)' }}>
+                                                <ChevronRight size={16} style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
+                                            </span>
+                                        </div>
+
+                                        {/* Detalle expandido del documento */}
+                                        {isExpanded && (
+                                            <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid var(--border-color)' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 0' }}>
+                                                    <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+                                                        Productos ({doc.items.length})
+                                                    </span>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); generateDocumentPDF(doc); }}
+                                                        className="btn btn-secondary"
+                                                        style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                                                    >
+                                                        <FileText size={14} /> PDF
+                                                    </button>
+                                                </div>
+                                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                                                    <thead>
+                                                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '500' }}>#</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '500' }}>Producto</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: '500' }}>Referencia</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: '500' }}>Cant.</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: '500' }}>Unidad</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'right', color: 'var(--text-secondary)', fontWeight: '500' }}>Costo U.</th>
+                                                            <th style={{ padding: '0.5rem', textAlign: 'right', color: 'var(--text-secondary)', fontWeight: '500' }}>Total</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {doc.items.map((item, idx) => (
+                                                            <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                                <td style={{ padding: '0.5rem', color: 'var(--text-secondary)' }}>{idx + 1}</td>
+                                                                <td style={{ padding: '0.5rem', fontWeight: '500' }}>{item.productName}</td>
+                                                                <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.productReference}</td>
+                                                                <td style={{ padding: '0.5rem', textAlign: 'center' }}>{item.quantity}</td>
+                                                                <td style={{ padding: '0.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>{item.unit}</td>
+                                                                <td style={{ padding: '0.5rem', textAlign: 'right' }}>${item.cost.toFixed(2)}</td>
+                                                                <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: '500', color: 'var(--success)' }}>${item.total.toFixed(2)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                    <tfoot>
+                                                        <tr style={{ borderTop: '2px solid var(--border-color)' }}>
+                                                            <td colSpan="6" style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold' }}>TOTAL:</td>
+                                                            <td style={{ padding: '0.5rem', textAlign: 'right', fontWeight: 'bold', color: 'var(--success)' }}>${doc.total.toFixed(2)}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+
+                            {/* Total general */}
+                            <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'rgba(var(--success-rgb), 0.1)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'flex-end', gap: '1rem', alignItems: 'center' }}>
+                                <span style={{ fontWeight: 'bold' }}>{hasSearch ? 'TOTAL ENCONTRADO:' : 'TOTAL DEL DIA:'}</span>
+                                <span style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--success)' }}>${grandTotal.toFixed(2)}</span>
                             </div>
                         </>
                     );
@@ -691,6 +1091,8 @@ const Purchases = () => {
                 addProduct={addProduct}
                 updateProduct={updateProduct}
                 addBrand={addBrand}
+                updateBrand={updateBrand}
+                deleteBrand={deleteBrand}
                 addCategory={addCategory}
             />
 

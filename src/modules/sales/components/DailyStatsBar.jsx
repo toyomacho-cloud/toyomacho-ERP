@@ -47,8 +47,8 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                 <div
                     onClick={() => setExpandido(!expandido)}
                     style={{
-                        background: expandido ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.1)',
-                        border: `2px solid ${expandido ? 'var(--primary)' : 'rgba(59, 130, 246, 0.2)'}`,
+                        background: expandido ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.06)',
+                        border: `2px solid ${expandido ? '#2563eb' : 'rgba(59, 130, 246, 0.15)'}`,
                         padding: '0.75rem 1rem',
                         borderRadius: expandido ? 'var(--radius-md) var(--radius-md) 0 0' : 'var(--radius-md)',
                         display: 'flex',
@@ -62,7 +62,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                         <div style={{
                             fontSize: '0.75rem',
                             fontWeight: 'bold',
-                            color: 'var(--primary)',
+                            color: '#1e293b',
                             marginBottom: '0.25rem',
                             display: 'flex',
                             alignItems: 'center',
@@ -78,8 +78,8 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                     <div style={{
                         fontSize: '1.5rem',
                         fontWeight: 'bold',
-                        color: 'var(--primary)',
-                        background: 'rgba(59, 130, 246, 0.1)',
+                        color: '#1e293b',
+                        background: 'rgba(30, 41, 59, 0.08)',
                         padding: '0.25rem 0.75rem',
                         borderRadius: '20px'
                     }}>
@@ -89,8 +89,8 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
 
                 {/* Por Cobrar */}
                 <div style={{
-                    background: 'rgba(245, 158, 11, 0.1)',
-                    border: '1px solid rgba(245, 158, 11, 0.2)',
+                    background: 'rgba(180, 83, 9, 0.07)',
+                    border: '1px solid rgba(180, 83, 9, 0.15)',
                     padding: '0.75rem 1rem',
                     borderRadius: 'var(--radius-md)',
                     display: 'flex',
@@ -101,7 +101,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                         <div style={{
                             fontSize: '0.75rem',
                             fontWeight: 'bold',
-                            color: 'var(--warning)',
+                            color: '#b45309',
                             marginBottom: '0.25rem'
                         }}>
                             💳 POR COBRAR
@@ -113,7 +113,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                     <div style={{
                         fontSize: '1.5rem',
                         fontWeight: 'bold',
-                        color: 'var(--warning)'
+                        color: '#b45309'
                     }}>
                         {formatearUSD(porCobrar)}
                     </div>
@@ -157,7 +157,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
             {expandido && (
                 <div style={{
                     background: 'white',
-                    border: '2px solid var(--primary)',
+                    border: '2px solid #2563eb',
                     borderTop: 'none',
                     borderRadius: '0 0 var(--radius-md) var(--radius-md)',
                     padding: '1rem',
@@ -237,7 +237,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                                                 padding: '0.75rem 0.5rem',
                                                 textAlign: 'right',
                                                 fontWeight: 'bold',
-                                                color: 'var(--success)'
+                                                color: '#059669'
                                             }}>
                                                 {formatearUSD(venta.total || venta.amount_usd || 0)}
                                             </td>
@@ -251,7 +251,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         background: 'rgba(16, 185, 129, 0.1)',
-                                                        color: 'var(--success)',
+                                                        color: '#059669',
                                                         padding: '0.2rem 0.5rem',
                                                         borderRadius: '12px',
                                                         fontSize: '0.75rem',
@@ -264,8 +264,8 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
-                                                        background: 'rgba(245, 158, 11, 0.1)',
-                                                        color: 'var(--warning)',
+                                                        background: 'rgba(180, 83, 9, 0.08)',
+                                                        color: '#b45309',
                                                         padding: '0.2rem 0.5rem',
                                                         borderRadius: '12px',
                                                         fontSize: '0.75rem',
@@ -311,7 +311,7 @@ const DailyStatsBar = ({ estadisticas, ventas = [] }) => {
                             <span style={{ color: '#64748b' }}>
                                 Total: {ventasDelDia.length} ventas
                             </span>
-                            <span style={{ fontWeight: 'bold', color: 'var(--success)' }}>
+                            <span style={{ fontWeight: 'bold', color: '#059669' }}>
                                 {formatearUSD(ventasTotales)}
                             </span>
                         </div>

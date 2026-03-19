@@ -6,7 +6,7 @@ import MovementForm from './MovementForm';
 import ProductForm from './ProductForm';
 
 const InventoryControl = () => {
-    const { movements, products, brands = [], categories = [], approveMovement, rejectMovement, updateCategory, deleteCategory, addProduct, updateProduct, addBrand, addCategory } = useInventoryContext();
+    const { movements, products, brands = [], categories = [], approveMovement, rejectMovement, updateCategory, deleteCategory, addProduct, updateProduct, addBrand, updateBrand, deleteBrand, addCategory } = useInventoryContext();
     const { isAdmin } = useAuth();
 
     // Create a map for quick product lookup by id
@@ -306,6 +306,8 @@ const InventoryControl = () => {
                 addProduct={addProduct}
                 updateProduct={updateProduct}
                 addBrand={addBrand}
+                updateBrand={updateBrand}
+                deleteBrand={deleteBrand}
                 addCategory={addCategory}
             />
 

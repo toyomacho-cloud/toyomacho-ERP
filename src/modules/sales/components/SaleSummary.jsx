@@ -53,18 +53,18 @@ const SaleSummary = ({
                 width: '80px',
                 height: '80px',
                 borderRadius: '50%',
-                background: 'rgba(16, 185, 129, 0.1)',
+                background: 'rgba(5, 150, 105, 0.06)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 margin: '0 auto 1.5rem'
             }}>
-                <CheckCircle size={48} color="var(--success)" />
+                <CheckCircle size={48} color="#059669" />
             </div>
 
             {/* Mensaje de exito */}
             <h2 style={{
-                color: 'var(--success)',
+                color: '#059669',
                 marginBottom: '0.5rem',
                 fontSize: '1.75rem'
             }}>
@@ -142,7 +142,7 @@ const SaleSummary = ({
 
             {/* Total */}
             <div style={{
-                background: 'rgba(16, 185, 129, 0.1)',
+                background: 'rgba(5, 150, 105, 0.06)',
                 borderRadius: 'var(--radius-md)',
                 padding: '1.5rem',
                 marginBottom: '2rem'
@@ -153,7 +153,7 @@ const SaleSummary = ({
                 <div style={{
                     fontSize: '2.5rem',
                     fontWeight: 'bold',
-                    color: 'var(--success)'
+                    color: '#065f46'
                 }}>
                     {formatearUSD(total)}
                 </div>

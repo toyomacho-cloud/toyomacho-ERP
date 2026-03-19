@@ -226,8 +226,8 @@ const SalesPanel = ({
                                 padding: '0.35rem 0.85rem',
                                 borderRadius: '20px',
                                 border: 'none',
-                                background: modoVenta === 'venta' ? '#cbd5e1' : 'transparent',
-                                color: modoVenta === 'venta' ? '#ea580c' : 'var(--text-secondary)',
+                                background: modoVenta === 'venta' ? '#e0f2fe' : 'transparent',
+                                color: modoVenta === 'venta' ? '#1e293b' : 'var(--text-secondary)',
                                 cursor: 'pointer',
                                 fontSize: '0.85rem',
                                 fontWeight: '600',
@@ -244,8 +244,8 @@ const SalesPanel = ({
                                 padding: '0.35rem 0.85rem',
                                 borderRadius: '20px',
                                 border: 'none',
-                                background: modoVenta === 'presupuesto' ? '#cbd5e1' : 'transparent',
-                                color: modoVenta === 'presupuesto' ? '#ea580c' : 'var(--text-secondary)',
+                                background: modoVenta === 'presupuesto' ? '#e0f2fe' : 'transparent',
+                                color: modoVenta === 'presupuesto' ? '#1e293b' : 'var(--text-secondary)',
                                 cursor: 'pointer',
                                 fontSize: '0.85rem',
                                 fontWeight: '600',
@@ -261,9 +261,9 @@ const SalesPanel = ({
                             style={{
                                 padding: '0.35rem 0.85rem',
                                 borderRadius: '20px',
-                                border: '1px solid #cbd5e1',
-                                background: '#f8fafc',
-                                color: '#475569',
+                                border: '1px solid #e0f2fe',
+                                background: '#f0f9ff',
+                                color: '#0c4a6e',
                                 cursor: 'pointer',
                                 fontSize: '0.85rem',
                                 fontWeight: '600',
@@ -279,7 +279,7 @@ const SalesPanel = ({
 
                 {/* Multi-carrito */}
                 <div style={{
-                    background: '#94a3b8',
+                    background: '#475569',
                     padding: '0.35rem 1rem',
                     borderRadius: '4px',
                     display: 'flex',
@@ -332,7 +332,7 @@ const SalesPanel = ({
                         <button
                             onClick={agregarNuevoCarrito}
                             style={{
-                                border: '1px solid #94a3b8',
+                                border: '1px solid #64748b',
                                 background: '#e2e8f0',
                                 color: '#475569',
                                 borderRadius: '20px',
@@ -358,14 +358,14 @@ const SalesPanel = ({
                             style={{
                                 padding: '0.5rem 1rem',
                                 borderRadius: '12px',
-                                border: `2px solid ${tipoTasaSeleccionada === 'bcv' ? '#22c55e' : 'transparent'}`,
-                                background: '#dcfce7',
+                                border: `2px solid ${tipoTasaSeleccionada === 'bcv' ? '#059669' : 'transparent'}`,
+                                background: '#ecfdf5',
                                 cursor: 'pointer',
                                 minWidth: '100px'
                             }}
                         >
-                            <div style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: '800', letterSpacing: '0.5px' }}>BCV</div>
-                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#166534' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#047857', fontWeight: '800', letterSpacing: '0.5px' }}>BCV</div>
+                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#065f46' }}>
                                 {(tasaBCV || 0).toFixed(2)} <span style={{ fontSize: '0.7rem' }}>Bs/$</span>
                             </div>
                         </div>
@@ -374,14 +374,14 @@ const SalesPanel = ({
                             style={{
                                 padding: '0.5rem 1rem',
                                 borderRadius: '12px',
-                                border: `2px solid ${tipoTasaSeleccionada === 'binance' ? '#eab308' : 'transparent'}`,
-                                background: '#fef9c3',
+                                border: `2px solid ${tipoTasaSeleccionada === 'binance' ? '#b45309' : 'transparent'}`,
+                                background: '#fffbeb',
                                 cursor: 'pointer',
                                 minWidth: '100px'
                             }}
                         >
-                            <div style={{ fontSize: '0.7rem', color: '#a16207', fontWeight: '800', letterSpacing: '0.5px' }}>BINANCE</div>
-                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#854d0e' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#92400e', fontWeight: '800', letterSpacing: '0.5px' }}>BINANCE</div>
+                            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: '#78350f' }}>
                                 {(tasaBinance || 0).toFixed(2)} <span style={{ fontSize: '0.7rem' }}>Bs/$</span>
                             </div>
                         </div>

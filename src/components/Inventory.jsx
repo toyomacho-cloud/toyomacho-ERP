@@ -20,6 +20,8 @@ const Inventory = () => {
         addCategory,
         addProductsBatch,
         addBrand,
+        updateBrand,
+        deleteBrand,
         addBrands,
         addProduct,
         updateProduct
@@ -580,6 +582,8 @@ const Inventory = () => {
                     addProduct={addProduct}
                     updateProduct={updateProduct}
                     addBrand={addBrand}
+                    updateBrand={updateBrand}
+                    deleteBrand={deleteBrand}
                     addCategory={addCategory}
                 />
 

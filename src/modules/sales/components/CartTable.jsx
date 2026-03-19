@@ -119,7 +119,7 @@ const CartTable = ({
                             }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                                     <span>P/U:</span>
-                                    <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>$</span>
+                                    <span style={{ color: '#059669', fontWeight: 'bold' }}>$</span>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -133,7 +133,7 @@ const CartTable = ({
                                             padding: '2px 6px',
                                             fontSize: '0.8rem',
                                             fontWeight: 'bold',
-                                            color: 'var(--success)',
+                                            color: '#059669',
                                             background: '#f8fafc',
                                             textAlign: 'right'
                                         }}
@@ -199,7 +199,7 @@ const CartTable = ({
 
                             {/* Subtotal del item */}
                             <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontWeight: 'bold', color: 'var(--success)', fontSize: '0.95rem' }}>
+                                <div style={{ fontWeight: 'bold', color: '#047857', fontSize: '0.95rem' }}>
                                     {formatearUSD(item.precioUSD * item.cantidad)}
                                 </div>
                                 <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
@@ -241,7 +241,7 @@ const CartTable = ({
                 }}>
                     <span>Total:</span>
                     <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: 'var(--success)' }}>{formatearUSD(total)}</div>
+                        <div style={{ color: '#065f46' }}>{formatearUSD(total)}</div>
                         <div style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: '600' }}>
                             {formatearBs(totalBs)}
                         </div>

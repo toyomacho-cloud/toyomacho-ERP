@@ -196,11 +196,11 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                 {/* Resumen Cards */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
                     {/* Pendiente en Caja */}
-                    <div style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--warning)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ padding: '1rem', background: '#fffbeb', borderRadius: 'var(--radius-md)', border: '1px solid rgba(180, 83, 9, 0.15)' }}>
+                        <div style={{ fontSize: '0.8rem', color: '#b45309', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <span>⏳ PENDIENTE</span>
                         </div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--warning)', margin: '0.5rem 0' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#92400e', margin: '0.5rem 0' }}>
                             ${totals.pendingUSD.toFixed(2)}
                         </div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -209,11 +209,11 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                     </div>
 
                     {/* Cobrado */}
-                    <div style={{ padding: '1rem', background: 'rgba(16, 185, 129, 0.1)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ padding: '1rem', background: '#ecfdf5', borderRadius: 'var(--radius-md)', border: '1px solid rgba(5, 150, 105, 0.15)' }}>
+                        <div style={{ fontSize: '0.8rem', color: '#059669', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <span>✅ PAGADO</span>
                         </div>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)', margin: '0.5rem 0' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#047857', margin: '0.5rem 0' }}>
                             ${totals.processedUSD.toFixed(2)}
                         </div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -283,11 +283,11 @@ const DailySalesModal = ({ isOpen, onClose, sales, products }) => {
                                                 <span style={{
                                                     padding: '0.2rem 0.5rem',
                                                     borderRadius: 'var(--radius-sm)',
-                                                    background: isPending ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                                                    color: isPending ? 'var(--warning)' : 'var(--success)',
+                                                    background: isPending ? 'rgba(180, 83, 9, 0.08)' : 'rgba(5, 150, 105, 0.08)',
+                                                    color: isPending ? '#b45309' : '#059669',
                                                     fontSize: '0.75rem',
                                                     fontWeight: 600,
-                                                    border: `1px solid ${isPending ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`
+                                                    border: `1px solid ${isPending ? 'rgba(180, 83, 9, 0.2)' : 'rgba(5, 150, 105, 0.2)'}`
                                                 }}>
                                                     {isPending ? 'Pendiente' : 'Pagado'}
                                                 </span>

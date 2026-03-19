@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabase';
 
 // Table names (snake_case for PostgreSQL)
@@ -6,6 +6,8 @@ const TABLES = {
     PRODUCTS: 'products',
     MOVEMENTS: 'movements',
     PURCHASES: 'purchases',
+    PURCHASE_HEADERS: 'purchase_headers',
+    PURCHASE_DETAILS: 'purchase_details',
     PROVIDERS: 'providers',
     BRANDS: 'brands',
     CATEGORIES: 'categories',
@@ -50,7 +52,7 @@ export const useInventory = (companyId) => {
 
         setLoading(true);
         const startTime = Date.now();
-        console.log('🚀 Starting optimized parallel data fetch...');
+        console.log('ðŸš€ Starting optimized parallel data fetch...');
 
         try {
             // ========== FASE 1: CARGA PARALELA ESENCIAL ==========
@@ -131,7 +133,7 @@ export const useInventory = (companyId) => {
             setCustomers(customersResult.data || []);
 
             const phase1Time = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`✅ Phase 1 complete: ${productsResult.length} products loaded in ${phase1Time}s`);
+            console.log(`âœ… Phase 1 complete: ${productsResult.length} products loaded in ${phase1Time}s`);
 
             // ========== FASE 2: CARGA SECUNDARIA (puede ser mas lenta) ==========
             // Movimientos, ventas, compras - LIMITADOS a ultimos 500 registros
@@ -162,10 +164,10 @@ export const useInventory = (companyId) => {
                     .order('created_at', { ascending: false })
                     .limit(LIMIT_RECORDS),
 
-                // Purchases (limited)
+                // Purchases (from purchase_headers with join to purchase_details)
                 supabase
-                    .from(TABLES.PURCHASES)
-                    .select('*')
+                    .from(TABLES.PURCHASE_HEADERS)
+                    .select('*, purchase_details(*)')
                     .eq('company_id', companyId)
                     .order('date', { ascending: false })
                     .limit(LIMIT_RECORDS),
@@ -215,13 +217,31 @@ export const useInventory = (companyId) => {
             }));
             setSales(salesData);
 
-            setPurchases(purchasesResult.data || []);
+            // Mapear purchase_headers a formato compatible con el frontend
+            const purchasesData = (purchasesResult.data || []).map(header => ({
+                ...header,
+                // Mantener compatibilidad: mapear purchase_details a items[]
+                items: (header.purchase_details || []).map(d => ({
+                    productId: d.product_id,
+                    productName: d.product_name,
+                    productSku: d.product_sku,
+                    productReference: d.product_reference,
+                    quantity: d.quantity,
+                    unit: d.unit,
+                    cost: d.unit_cost,
+                    unitCost: d.unit_cost,
+                    total: d.total
+                })),
+                invoice_number: header.invoice_number,
+                provider_name: header.provider_name
+            }));
+            setPurchases(purchasesData);
             setCashTransactions(cashTxResult.data || []);
             setAuthRequests(authRequestsResult.data || []);
             setCreditNotes(creditNotesResult.data || []);
 
             const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`🏁 All data loaded in ${totalTime}s (Products: ${productsResult.length}, Sales: ${salesData.length}, Movements: ${movementsResult.data?.length || 0})`);
+            console.log(`ðŸ All data loaded in ${totalTime}s (Products: ${productsResult.length}, Sales: ${salesData.length}, Movements: ${movementsResult.data?.length || 0})`);
 
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -243,7 +263,7 @@ export const useInventory = (companyId) => {
         // Solo procesar si es de nuestra company
         if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
 
-        console.log(`🔄 Product ${eventType}:`, newRecord?.description || oldRecord?.id);
+        console.log(`ðŸ”„ Product ${eventType}:`, newRecord?.description || oldRecord?.id);
 
         if (eventType === 'INSERT') {
             setProducts(prev => [...prev, newRecord]);
@@ -258,7 +278,7 @@ export const useInventory = (companyId) => {
         const { eventType, new: newRecord, old: oldRecord } = payload;
         if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
 
-        console.log(`🔄 Sale ${eventType}:`, newRecord?.document_number || oldRecord?.id);
+        console.log(`ðŸ”„ Sale ${eventType}:`, newRecord?.document_number || oldRecord?.id);
 
         if (eventType === 'INSERT') {
             // Enriquecer con estructura esperada
@@ -285,7 +305,7 @@ export const useInventory = (companyId) => {
         const { eventType, new: newRecord, old: oldRecord } = payload;
         if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
 
-        console.log(`🔄 Movement ${eventType}`);
+        console.log(`ðŸ”„ Movement ${eventType}`);
 
         if (eventType === 'INSERT') {
             setMovements(prev => [newRecord, ...prev]);
@@ -300,7 +320,7 @@ export const useInventory = (companyId) => {
         const { eventType, new: newRecord, old: oldRecord } = payload;
         if (newRecord?.company_id !== companyId && oldRecord?.company_id !== companyId) return;
 
-        console.log(`🔄 Purchase ${eventType}`);
+        console.log(`ðŸ”„ Purchase ${eventType}`);
 
         if (eventType === 'INSERT') {
             setPurchases(prev => [newRecord, ...prev]);
@@ -353,23 +373,23 @@ export const useInventory = (companyId) => {
     useEffect(() => {
         if (!companyId) return;
 
-        console.log('📡 Setting up granular real-time subscriptions...');
+        console.log('ðŸ“¡ Setting up granular real-time subscriptions...');
 
         const channel = supabase
             .channel(`company_${companyId}_optimized`)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PRODUCTS }, handleProductChange)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.SALES }, handleSaleChange)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.MOVEMENTS }, handleMovementChange)
-            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PURCHASES }, handlePurchaseChange)
+            .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.PURCHASE_HEADERS }, handlePurchaseChange)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CUSTOMERS }, handleCustomerChange)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_SESSIONS }, handleCashSessionChange)
             .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.CASH_TRANSACTIONS }, handleCashTransactionChange)
             .subscribe((status) => {
-                console.log('📡 Realtime subscription status:', status);
+                console.log('ðŸ“¡ Realtime subscription status:', status);
             });
 
         return () => {
-            console.log('📡 Removing real-time channel');
+            console.log('ðŸ“¡ Removing real-time channel');
             supabase.removeChannel(channel);
         };
     }, [companyId, handleProductChange, handleSaleChange, handleMovementChange, handlePurchaseChange, handleCustomerChange, handleCashSessionChange, handleCashTransactionChange]);
@@ -460,7 +480,7 @@ export const useInventory = (companyId) => {
                 min_stock: minStock !== undefined ? minStock : cleanUpdates.min_stock,
                 updated_at: new Date().toISOString()
             };
-            console.log(`📝 updateProduct: id=${id}, updates=`, dbUpdates);
+            console.log(`ðŸ“ updateProduct: id=${id}, updates=`, dbUpdates);
 
             const { data: updatedProduct, error } = await supabase
                 .from(TABLES.PRODUCTS)
@@ -471,16 +491,16 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (error) {
-                console.error('❌ updateProduct error:', error);
+                console.error('âŒ updateProduct error:', error);
                 throw error;
             }
 
             if (!updatedProduct) {
-                console.error('❌ updateProduct: No se actualizo ningun producto. Verificar ID y company_id');
+                console.error('âŒ updateProduct: No se actualizo ningun producto. Verificar ID y company_id');
                 throw new Error('No se pudo actualizar el producto');
             }
 
-            console.log('✅ Product updated successfully:', updatedProduct.description, 'quantity:', updatedProduct.quantity);
+            console.log('âœ… Product updated successfully:', updatedProduct.description, 'quantity:', updatedProduct.quantity);
             await fetchData();
             return updatedProduct;
         } catch (error) {
@@ -495,7 +515,7 @@ export const useInventory = (companyId) => {
         try {
             if (!companyId) throw new Error('Company ID is missing (deleteProduct)');
 
-            console.log(`🗑️ Soft-deleting product: id=${id}, company_id=${companyId}`);
+            console.log(`ðŸ—‘ï¸ Soft-deleting product: id=${id}, company_id=${companyId}`);
 
             // Use UPDATE instead of DELETE to avoid RLS issues
             // Mark as deleted rather than physically removing
@@ -509,13 +529,13 @@ export const useInventory = (companyId) => {
                 .eq('company_id', companyId);
 
             if (error) {
-                console.error('❌ Soft delete error:', error);
+                console.error('âŒ Soft delete error:', error);
                 throw error;
             }
 
             // Remove from local state immediately
             setProducts(prev => prev.filter(p => p.id !== id));
-            console.log('✅ Product soft-deleted successfully');
+            console.log('âœ… Product soft-deleted successfully');
         } catch (error) {
             console.error('Error deleting product:', error);
             alert(`Error al eliminar: ${error.message}`);
@@ -529,7 +549,7 @@ export const useInventory = (companyId) => {
             if (!companyId) throw new Error('Company ID is missing (deleteProductsBatch)');
             if (!ids || ids.length === 0) throw new Error('No products selected');
 
-            console.log(`🗑️ Bulk soft-deleting ${ids.length} products...`);
+            console.log(`ðŸ—‘ï¸ Bulk soft-deleting ${ids.length} products...`);
 
             // Use UPDATE with .in() for efficient batch soft-delete
             const { error } = await supabase
@@ -542,13 +562,13 @@ export const useInventory = (companyId) => {
                 .eq('company_id', companyId);
 
             if (error) {
-                console.error('❌ Bulk soft delete error:', error);
+                console.error('âŒ Bulk soft delete error:', error);
                 throw error;
             }
 
             // Remove from local state immediately
             setProducts(prev => prev.filter(p => !ids.includes(p.id)));
-            console.log(`✅ ${ids.length} products soft-deleted successfully`);
+            console.log(`âœ… ${ids.length} products soft-deleted successfully`);
 
             return { deleted: ids.length };
         } catch (error) {
@@ -695,6 +715,72 @@ export const useInventory = (companyId) => {
         return brands.find(b => b.name === brandName) || newBrand;
     };
 
+    const updateBrand = async (id, oldName, newName, newCode) => {
+        try {
+            if (!companyId) throw new Error('Company ID is missing (updateBrand)');
+
+            // 1. Actualizar la marca en la tabla brands
+            const { error: brandError } = await supabase
+                .from(TABLES.BRANDS)
+                .update({ name: newName, code: newCode })
+                .eq('id', id)
+                .eq('company_id', companyId);
+
+            if (brandError) throw brandError;
+
+            // 2. Actualizar el campo brand en todos los productos que usen el nombre anterior
+            if (oldName !== newName) {
+                const { error: prodError } = await supabase
+                    .from(TABLES.PRODUCTS)
+                    .update({ brand: newName, updated_at: new Date().toISOString() })
+                    .eq('brand', oldName)
+                    .eq('company_id', companyId);
+
+                if (prodError) {
+                    console.error('Error actualizando productos con la nueva marca:', prodError);
+                }
+            }
+
+            console.log(`âœ… Marca actualizada: ${oldName} -> ${newName}`);
+            await fetchData();
+        } catch (error) {
+            console.error('Error updating brand:', error);
+            throw error;
+        }
+    };
+
+    const deleteBrand = async (id, brandName) => {
+        try {
+            if (!companyId) throw new Error('Company ID is missing (deleteBrand)');
+
+            // 1. Limpiar el campo brand de productos que usen esta marca
+            const { error: prodError } = await supabase
+                .from(TABLES.PRODUCTS)
+                .update({ brand: '', updated_at: new Date().toISOString() })
+                .eq('brand', brandName)
+                .eq('company_id', companyId);
+
+            if (prodError) {
+                console.error('Error limpiando marca de productos:', prodError);
+            }
+
+            // 2. Eliminar la marca de la tabla brands
+            const { error: brandError } = await supabase
+                .from(TABLES.BRANDS)
+                .delete()
+                .eq('id', id)
+                .eq('company_id', companyId);
+
+            if (brandError) throw brandError;
+
+            console.log(`âœ… Marca eliminada: ${brandName}`);
+            await fetchData();
+        } catch (error) {
+            console.error('Error deleting brand:', error);
+            throw error;
+        }
+    };
+
     // ========== CATEGORIES ==========
     const addCategory = async (categoryData) => {
         try {
@@ -734,7 +820,7 @@ export const useInventory = (companyId) => {
         try {
             const esPresupuesto = saleData.is_quote || saleData.document_type === 'presupuesto';
 
-            console.log('💾 addSale - datos recibidos:', {
+            console.log('ðŸ’¾ addSale - datos recibidos:', {
                 product_id: saleData.product_id,
                 quantity: saleData.quantity,
                 is_quote: saleData.is_quote,
@@ -783,12 +869,12 @@ export const useInventory = (companyId) => {
                         createdBy: saleUserName || 'Usuario POS'
                     });
 
-                    console.log(`✅ Movimiento de salida creado (via addMovement) para venta ${sale.document_number}`);
+                    console.log(`âœ… Movimiento de salida creado (via addMovement) para venta ${sale.document_number}`);
                 } else {
-                    console.warn(`⚠️ Producto ${productId} no encontrado en DB para descontar stock`);
+                    console.warn(`âš ï¸ Producto ${productId} no encontrado en DB para descontar stock`);
                 }
             } else {
-                console.warn('⚠️ NO se desconto stock:', {
+                console.warn('âš ï¸ NO se desconto stock:', {
                     esPresupuesto,
                     productId: productId || 'MISSING',
                     cantidadVendida,
@@ -816,7 +902,7 @@ export const useInventory = (companyId) => {
 
                     await Promise.all(transactionPromises);
                 } else {
-                    console.warn('⚠️ No open cash session found. Payments recorded but not linked to session.');
+                    console.warn('âš ï¸ No open cash session found. Payments recorded but not linked to session.');
                 }
             }
 
@@ -831,7 +917,7 @@ export const useInventory = (companyId) => {
     // ========== BATCH SALES (OPTIMIZED) ==========
     const addSalesBatch = async (saleItems, paymentMethods = [], userName = 'Usuario POS') => {
         try {
-            console.log(`🚀 addSalesBatch: Processing ${saleItems.length} items...`);
+            console.log(`ðŸš€ addSalesBatch: Processing ${saleItems.length} items...`);
             const startTime = Date.now();
 
             // 1. Batch Insert ALL sales at once (remove user_name as sales table doesn't have it)
@@ -847,7 +933,7 @@ export const useInventory = (companyId) => {
                 .select();
 
             if (salesError) throw salesError;
-            console.log(`✅ Inserted ${insertedSales.length} sales in batch`);
+            console.log(`âœ… Inserted ${insertedSales.length} sales in batch`);
 
             // 2. Check if we need to update stock (not for quotes)
             const esPresupuesto = saleItems[0]?.is_quote || saleItems[0]?.document_type === 'presupuesto';
@@ -862,7 +948,7 @@ export const useInventory = (companyId) => {
                     .eq('company_id', companyId);
 
                 const freshProductMap = new Map((freshProducts || []).map(p => [p.id, p]));
-                console.log(`📦 Stock fresco leido de DB para ${freshProductMap.size} productos`);
+                console.log(`ðŸ“¦ Stock fresco leido de DB para ${freshProductMap.size} productos`);
 
                 const stockUpdates = new Map(); // Acumular descuentos por producto
                 const movementsToInsert = [];
@@ -920,7 +1006,7 @@ export const useInventory = (companyId) => {
                             .eq('company_id', companyId)
                     );
                     await Promise.all(updatePromises);
-                    console.log(`✅ Updated stock for ${stockUpdates.size} products in parallel`);
+                    console.log(`âœ… Updated stock for ${stockUpdates.size} products in parallel`);
                 }
 
                 // 5. Batch insert movements
@@ -929,10 +1015,10 @@ export const useInventory = (companyId) => {
                         .from(TABLES.MOVEMENTS)
                         .insert(movementsToInsert);
                     if (movError) {
-                        console.error('❌ Movement insert error:', movError);
+                        console.error('âŒ Movement insert error:', movError);
                         throw new Error(`Error insertando movimientos de venta: ${movError.message}`);
                     }
-                    console.log(`✅ Inserted ${movementsToInsert.length} movements in batch`);
+                    console.log(`âœ… Inserted ${movementsToInsert.length} movements in batch`);
                 }
             }
 
@@ -953,14 +1039,14 @@ export const useInventory = (companyId) => {
                     })
                 );
                 await Promise.all(transactionPromises);
-                console.log(`✅ Registered ${paymentMethods.length} payments`);
+                console.log(`âœ… Registered ${paymentMethods.length} payments`);
             }
 
             // 7. Single fetchData at the end
             await fetchData();
 
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`🏁 addSalesBatch completed in ${elapsed}s`);
+            console.log(`ðŸ addSalesBatch completed in ${elapsed}s`);
 
             return insertedSales;
         } catch (error) {
@@ -996,7 +1082,7 @@ export const useInventory = (companyId) => {
             if (fetchError) throw fetchError;
             if (!sale) throw new Error('Venta no encontrada');
 
-            console.log('🗑️ Deleting sale and reverting stock:', sale);
+            console.log('ðŸ—‘ï¸ Deleting sale and reverting stock:', sale);
 
             // 2. Revert Stock (Manual workaround if relation mapping is complex, 
             // but we have `sales` state with parsed items. Let's use local state if possible? 
@@ -1019,7 +1105,7 @@ export const useInventory = (companyId) => {
                 if (freshProduct) {
                     const currentQty = freshProduct.quantity || 0;
                     const revertedQty = currentQty + (parseFloat(sale.quantity) || 0);
-                    console.log(`↺ Reverting ${sale.quantity} of ${freshProduct.description}. Stock: ${currentQty} → ${revertedQty}`);
+                    console.log(`â†º Reverting ${sale.quantity} of ${freshProduct.description}. Stock: ${currentQty} â†’ ${revertedQty}`);
 
                     // BUG-6 FIX: Solo registrar movimiento (sin updateProduct previo)
                     // addMovement con status=approved ya actualiza el stock del producto
@@ -1058,13 +1144,13 @@ export const useInventory = (companyId) => {
     // ========== MOVEMENTS ==========
     const addMovement = async (movementData) => {
         try {
-            console.log('📦 addMovement called with:', movementData);
-            console.log('📦 Company ID:', companyId);
+            console.log('ðŸ“¦ addMovement called with:', movementData);
+            console.log('ðŸ“¦ Company ID:', companyId);
 
             // Validate companyId
             if (!companyId) {
                 const errorMsg = 'No hay empresa seleccionada. Por favor inicie sesion nuevamente.';
-                console.error('❌ ' + errorMsg);
+                console.error('âŒ ' + errorMsg);
                 throw new Error(errorMsg);
             }
 
@@ -1072,6 +1158,7 @@ export const useInventory = (companyId) => {
             if (!productId) {
                 throw new Error('productId es requerido para el movimiento');
             }
+            console.log('ðŸ“¦ productId recibido:', productId, 'tipo:', typeof productId);
 
             // BUG-1 FIX: SIEMPRE leer stock fresco de la DB (nunca del cache)
             const { data: product, error: fetchError } = await supabase
@@ -1082,16 +1169,18 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (fetchError) {
-                console.error('❌ Error buscando producto:', fetchError);
+                console.error('âŒ Error buscando producto:', fetchError);
                 throw new Error('Producto no encontrado en la base de datos');
             }
 
-            console.log('📦 Found product (DB fresh):', product ? { id: product.id, quantity: product.quantity, description: product.description } : 'NOT FOUND');
+            console.log('ðŸ“¦ Found product (DB fresh):', product ? { id: product.id, quantity: product.quantity, description: product.description } : 'NOT FOUND');
 
             const currentQty = product?.quantity || 0;
             const qty = parseFloat(movementData.quantity) || 0;
             const movementType = (movementData.type || '').toLowerCase();
-            const status = movementData.status || 'pending';
+            // SEGURIDAD: Los ajustes SIEMPRE deben quedar pendientes (defensa en profundidad)
+            const rawStatus = movementData.status || 'pending';
+            const status = (movementType === 'ajuste' && rawStatus === 'approved') ? 'pending' : rawStatus;
 
             // Calculate expected new quantity after this movement
             let newQty = currentQty;
@@ -1101,7 +1190,7 @@ export const useInventory = (companyId) => {
                 // ========== VALIDACION STOCK INSUFICIENTE ==========
                 if (qty > currentQty) {
                     const errorMsg = `Stock insuficiente para "${product?.description || 'producto'}". Disponible: ${currentQty}, Solicitado: ${qty}`;
-                    console.error('❌ ' + errorMsg);
+                    console.error('âŒ ' + errorMsg);
                     throw new Error(errorMsg);
                 }
                 newQty = currentQty - qty;
@@ -1109,7 +1198,7 @@ export const useInventory = (companyId) => {
                 newQty = qty; // Ajuste sets absolute value
             }
 
-            console.log(`📦 Calculation (DB fresh): currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}, status=${status}`);
+            console.log(`ðŸ“¦ Calculation (DB fresh): currentQty=${currentQty}, qty=${qty}, type=${movementType}, newQty=${newQty}, status=${status}`);
 
             // Use snake_case to match PostgreSQL column naming convention
             const dbRecord = {
@@ -1133,7 +1222,7 @@ export const useInventory = (companyId) => {
                 dbRecord.approved_at = new Date().toISOString();
             }
 
-            console.log('📝 Inserting movement:', dbRecord);
+            console.log('ðŸ“ Inserting movement:', dbRecord);
 
             const { data, error } = await supabase
                 .from(TABLES.MOVEMENTS)
@@ -1142,15 +1231,16 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (error) {
-                console.error('❌ Insert error:', error);
+                console.error('âŒ Insert error:', error);
                 throw error;
             }
 
-            console.log('✅ Movement inserted:', data);
+            console.log('âœ… Movement inserted:', data);
 
             // BUG-2 FIX: Si el movimiento es aprobado, actualizar el producto directamente
             // Ya tenemos el newQty calculado correctamente con stock fresco de DB
             if (status === 'approved' && productId) {
+                console.log(`ðŸ“ Actualizando producto ${productId} (tipo: ${typeof productId}) con quantity=${newQty}...`);
                 const { data: updatedProduct, error: updateError } = await supabase
                     .from(TABLES.PRODUCTS)
                     .update({
@@ -1163,14 +1253,28 @@ export const useInventory = (companyId) => {
                     .single();
 
                 if (updateError) {
-                    console.error('❌ Error updating product quantity:', updateError);
+                    console.error('âŒ Error updating product quantity:', updateError);
                     throw updateError;
                 }
 
-                console.log('✅ Product quantity updated:', updatedProduct);
+                if (!updatedProduct) {
+                    console.error('âŒ Update no retorno producto - productId no coincide en DB');
+                    throw new Error(`No se pudo actualizar el producto ${productId}. Verifique que existe.`);
+                }
+
+                // Validacion post-update: verificar que la cantidad se actualizo
+                if (updatedProduct.quantity !== newQty) {
+                    console.error(`âŒ Post-update mismatch: expected=${newQty}, actual=${updatedProduct.quantity}`);
+                    throw new Error(`Error de consistencia: stock esperado ${newQty}, actual ${updatedProduct.quantity}`);
+                }
+
+                console.log('âœ… Product quantity updated:', updatedProduct.description, 'qty:', updatedProduct.quantity);
             }
 
-            await fetchData();
+            // Solo refrescar si no estamos en contexto batch
+            if (!movementData._skipRefresh) {
+                await fetchData();
+            }
             return data;
         } catch (error) {
             console.error('Error adding movement:', error);
@@ -1198,19 +1302,18 @@ export const useInventory = (companyId) => {
             const movementId = movement.id;
             if (!movementId) throw new Error('Movement ID not found');
 
-            console.log('🚀 approveMovement iniciado para movimiento:', movementId);
+            console.log('ðŸš€ approveMovement iniciado para movimiento:', movementId);
 
-            // Find product - handle both productId (camelCase) and product_id (snake_case)
             const productId = movement.productId || movement.product_id;
-            console.log('🔍 ProductId del movimiento:', productId);
+            console.log('ðŸ” ProductId del movimiento:', productId, 'tipo:', typeof productId);
 
             if (!productId) {
-                console.error('❌ El movimiento no tiene product_id');
+                console.error('âŒ El movimiento no tiene product_id');
                 throw new Error('Movement has no product_id');
             }
 
             // Obtener producto directamente de la DB (no del cache)
-            console.log('📥 Buscando producto en DB...');
+            console.log('ðŸ“¥ Buscando producto en DB...');
             const { data: product, error: fetchError } = await supabase
                 .from(TABLES.PRODUCTS)
                 .select('*')
@@ -1219,16 +1322,16 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (fetchError) {
-                console.error('❌ Error buscando producto:', fetchError);
+                console.error('âŒ Error buscando producto:', fetchError);
                 throw fetchError;
             }
 
             if (!product) {
-                console.error('❌ Producto no encontrado con id:', productId);
+                console.error('âŒ Producto no encontrado con id:', productId);
                 throw new Error(`Product not found: ${productId}`);
             }
 
-            console.log('✅ Producto encontrado:', product.description, 'Stock actual:', product.quantity);
+            console.log('âœ… Producto encontrado:', product.description, 'Stock actual:', product.quantity);
 
             // RE-LEER stock fresco de la DB para evitar race condition
             const { data: freshProduct } = await supabase
@@ -1251,10 +1354,10 @@ export const useInventory = (companyId) => {
                 newQuantity = qty; // Ajuste sets absolute value
             }
 
-            console.log(`📦 Re-lectura atomica: stockFresco=${currentQty}, final=${newQuantity}`);
+            console.log(`ðŸ“¦ Re-lectura atomica: stockFresco=${currentQty}, final=${newQuantity}`);
 
             // 1. Actualizar el movimiento con status approved y new_qty
-            console.log('📝 Actualizando movimiento a approved...');
+            console.log('ðŸ“ Actualizando movimiento a approved...');
             const { error: movError } = await supabase
                 .from(TABLES.MOVEMENTS)
                 .update({
@@ -1265,13 +1368,13 @@ export const useInventory = (companyId) => {
                 .eq('id', movementId);
 
             if (movError) {
-                console.error('❌ Error actualizando movimiento:', movError);
+                console.error('âŒ Error actualizando movimiento:', movError);
                 throw movError;
             }
-            console.log('✅ Movimiento actualizado a approved');
+            console.log('âœ… Movimiento actualizado a approved');
 
             // 2. Actualizar el producto con stock recalculado
-            console.log(`📝 Actualizando producto ${productId} con quantity=${newQuantity}...`);
+            console.log(`ðŸ“ Actualizando producto ${productId} (tipo: ${typeof productId}) con quantity=${newQuantity}...`);
             const { data: updatedProduct, error: updateError } = await supabase
                 .from(TABLES.PRODUCTS)
                 .update({
@@ -1284,23 +1387,30 @@ export const useInventory = (companyId) => {
                 .single();
 
             if (updateError) {
-                console.error('❌ Error actualizando producto:', updateError);
+                console.error('âŒ Error actualizando producto:', updateError);
                 throw updateError;
             }
 
-            if (updatedProduct) {
-                console.log('✅ PRODUCTO ACTUALIZADO EXITOSAMENTE:', updatedProduct.description, 'Nuevo stock:', updatedProduct.quantity);
-            } else {
-                console.error('❌ Update no retorno producto - posible problema de matching');
+            if (!updatedProduct) {
+                console.error('âŒ Update no retorno producto - productId no coincide en DB');
+                throw new Error(`No se pudo actualizar el producto ${productId} en approveMovement.`);
             }
 
+            // Validacion post-update
+            if (updatedProduct.quantity !== newQuantity) {
+                console.error(`âŒ Post-update mismatch: expected=${newQuantity}, actual=${updatedProduct.quantity}`);
+                throw new Error(`Error de consistencia: stock esperado ${newQuantity}, actual ${updatedProduct.quantity}`);
+            }
+
+            console.log('âœ… PRODUCTO ACTUALIZADO EXITOSAMENTE:', updatedProduct.description, 'Nuevo stock:', updatedProduct.quantity);
+
             // 3. Refrescar datos en UI
-            console.log('🔄 Refrescando datos...');
+            console.log('ðŸ”„ Refrescando datos...');
             await fetchData();
-            console.log('✅ approveMovement completado exitosamente');
+            console.log('âœ… approveMovement completado exitosamente');
 
         } catch (error) {
-            console.error('❌ Error en approveMovement:', error);
+            console.error('âŒ Error en approveMovement:', error);
             throw error;
         }
     };
@@ -1342,7 +1452,7 @@ export const useInventory = (companyId) => {
         }
     };
 
-    // ========== PURCHASES ==========
+    // ========== PURCHASES (2 tablas: purchase_headers + purchase_details) ==========
     const addPurchase = async (purchaseData, userName = 'Usuario') => {
         try {
             // Si es un array, convertir a estructura de una sola compra con items
@@ -1352,17 +1462,18 @@ export const useInventory = (companyId) => {
             const firstItem = items[0] || {};
             const invoiceNumber = firstItem.invoiceNumber || '';
             const providerName = firstItem.providerName || 'Proveedor';
+            const documentType = firstItem.documentType || 'factura';
 
             // ========== VALIDAR FACTURA DUPLICADA ==========
             if (invoiceNumber) {
-                const { data: existingPurchase } = await supabase
-                    .from(TABLES.PURCHASES)
+                const { data: existingHeader } = await supabase
+                    .from(TABLES.PURCHASE_HEADERS)
                     .select('id, invoice_number')
                     .eq('company_id', companyId)
                     .eq('invoice_number', invoiceNumber)
                     .single();
 
-                if (existingPurchase) {
+                if (existingHeader) {
                     throw new Error(`La factura "${invoiceNumber}" ya fue registrada anteriormente. Por favor verifique.`);
                 }
             }
@@ -1370,24 +1481,13 @@ export const useInventory = (companyId) => {
             // Calcular total
             const total = items.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0);
 
-            // Formatear items para el campo JSONB
-            const formattedItems = items.map(item => ({
-                productId: String(item.productId),
-                productName: item.productName,
-                productSku: item.productSku,
-                productReference: item.productReference,
-                quantity: parseInt(item.quantity) || 0,
-                unit: item.unit || 'Pza',
-                unitCost: parseFloat(item.cost) || 0,
-                total: parseFloat(item.total) || 0
-            }));
-
-            const purchaseRecord = {
+            // ========== 1. INSERTAR ENCABEZADO ==========
+            const headerRecord = {
                 company_id: companyId,
+                invoice_number: invoiceNumber,
+                document_type: documentType,
                 provider_id: null,
                 provider_name: providerName,
-                invoice_number: invoiceNumber,
-                items: formattedItems,
                 subtotal: total,
                 tax: 0,
                 total: total,
@@ -1397,33 +1497,52 @@ export const useInventory = (companyId) => {
                 created_at: new Date().toISOString()
             };
 
-            const { data: purchase, error } = await supabase
-                .from(TABLES.PURCHASES)
-                .insert(purchaseRecord)
+            const { data: header, error: headerError } = await supabase
+                .from(TABLES.PURCHASE_HEADERS)
+                .insert(headerRecord)
                 .select()
                 .single();
 
-            if (error) throw error;
+            if (headerError) throw headerError;
 
-            // ========== ACTUALIZAR STOCK Y REGISTRAR MOVIMIENTOS ==========
-            // Usa addMovement como unica puerta de entrada para stock
+            // ========== 2. INSERTAR DETALLES ==========
+            const detailRecords = items.map(item => ({
+                purchase_header_id: header.id,
+                product_id: item.productId ? String(item.productId) : null,
+                product_name: item.productName || 'N/A',
+                product_sku: item.productSku || null,
+                product_reference: item.productReference || null,
+                quantity: parseFloat(item.quantity) || 0,
+                unit: item.unit || 'Pza',
+                unit_cost: parseFloat(item.cost) || 0,
+                total: parseFloat(item.total) || 0
+            }));
+
+            const { error: detailsError } = await supabase
+                .from(TABLES.PURCHASE_DETAILS)
+                .insert(detailRecords);
+
+            if (detailsError) throw detailsError;
+
+            // ========== 3. ACTUALIZAR STOCK Y REGISTRAR MOVIMIENTOS ==========
             for (const item of items) {
                 if (item.productId) {
                     const qty = parseFloat(item.quantity) || 0;
 
-                    // Actualizar costo del producto (sin tocar quantity, eso lo hace addMovement)
+                    // Actualizar costo y precio del producto
                     if (item.cost) {
                         await supabase
                             .from(TABLES.PRODUCTS)
                             .update({
                                 cost: parseFloat(item.cost),
+                                price: parseFloat(item.cost),
                                 updated_at: new Date().toISOString()
                             })
                             .eq('id', item.productId)
                             .eq('company_id', companyId);
                     }
 
-                    // Leer datos frescos del producto para sku/nombre
+                    // Leer datos frescos del producto
                     const { data: freshProduct } = await supabase
                         .from(TABLES.PRODUCTS)
                         .select('id, sku, reference, description')
@@ -1432,7 +1551,6 @@ export const useInventory = (companyId) => {
                         .single();
 
                     if (freshProduct) {
-                        // addMovement lee stock fresco, calcula new_qty, inserta movimiento y actualiza product.quantity
                         await addMovement({
                             productId: freshProduct.id,
                             sku: freshProduct.sku || freshProduct.reference || '',
@@ -1441,384 +1559,384 @@ export const useInventory = (companyId) => {
                             quantity: qty,
                             reason: `compra`,
                             status: 'approved',
-                            createdBy: userName
+                            createdBy: userName,
+                            _skipRefresh: true
                         });
-
-                        console.log(`📦 Compra (via addMovement): +${qty} de ${freshProduct.description}`);
                     }
                 }
             }
 
             await fetchData();
-            return purchase;
+            return header;
         } catch (error) {
             console.error('Error adding purchase:', error);
             throw error;
         }
     };
+// ========== CUSTOMERS ==========
+const addCustomer = async (customerData) => {
+    try {
+        const { data, error } = await supabase
+            .from(TABLES.CUSTOMERS)
+            .insert({
+                ...customerData,
+                company_id: companyId,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
 
-    // ========== CUSTOMERS ==========
-    const addCustomer = async (customerData) => {
-        try {
-            const { data, error } = await supabase
-                .from(TABLES.CUSTOMERS)
-                .insert({
-                    ...customerData,
-                    company_id: companyId,
-                    created_at: new Date().toISOString()
-                })
-                .select()
-                .single();
+        if (error) throw error;
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error adding customer:', error);
+        throw error;
+    }
+};
 
-            if (error) throw error;
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error adding customer:', error);
-            throw error;
-        }
-    };
+const updateCustomer = async (id, updates) => {
+    try {
+        const { error } = await supabase
+            .from(TABLES.CUSTOMERS)
+            .update(updates)
+            .eq('id', id);
 
-    const updateCustomer = async (id, updates) => {
-        try {
-            const { error } = await supabase
-                .from(TABLES.CUSTOMERS)
-                .update(updates)
-                .eq('id', id);
+        if (error) throw error;
+        await fetchData();
+    } catch (error) {
+        console.error('Error updating customer:', error);
+        throw error;
+    }
+};
 
-            if (error) throw error;
-            await fetchData();
-        } catch (error) {
-            console.error('Error updating customer:', error);
-            throw error;
-        }
-    };
+// ========== PAYMENTS ==========
+const addPayment = async (paymentData) => {
+    try {
+        const { data, error } = await supabase
+            .from(TABLES.PAYMENTS)
+            .insert({
+                ...paymentData,
+                company_id: companyId,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
 
-    // ========== PAYMENTS ==========
-    const addPayment = async (paymentData) => {
-        try {
-            const { data, error } = await supabase
-                .from(TABLES.PAYMENTS)
-                .insert({
-                    ...paymentData,
-                    company_id: companyId,
-                    created_at: new Date().toISOString()
-                })
-                .select()
-                .single();
+        if (error) throw error;
 
-            if (error) throw error;
-
-            // Update sale paid amount
-            if (paymentData.sale_id) {
-                const sale = sales.find(s => s.id === paymentData.sale_id);
-                if (sale) {
-                    const newPaidAmount = (sale.paid_amount || 0) + paymentData.amount;
-                    const remaining = (sale.amount_usd || 0) - newPaidAmount;
-                    await updateSale(sale.id, {
-                        paid_amount: newPaidAmount,
-                        remaining_amount: remaining,
-                        payment_status: remaining <= 0 ? 'paid' : 'partial'
-                    });
-                }
-            }
-
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error adding payment:', error);
-            throw error;
-        }
-    };
-
-    // ========== CASH SESSIONS ==========
-    const openCashSession = async (cashierData, openingAmounts) => {
-        try {
-            if (!companyId) {
-                console.error('❌ Attempted to open cash session without companyId');
-                throw new Error('Error: No se ha identificado la empresa. Por favor recargue la página.');
-            }
-
-            const { data, error } = await supabase
-                .from(TABLES.CASH_SESSIONS)
-                .insert({
-                    company_id: companyId,
-                    cashier_id: cashierData.id,
-                    cashier_name: cashierData.name,
-                    status: 'open',
-                    opening_usd: openingAmounts.usd || 0,
-                    opening_bs: openingAmounts.bs || 0,
-                    opened_at: new Date().toISOString()
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error opening cash session:', error);
-            throw error;
-        }
-    };
-
-    const closeCashSession = async (sessionId, closingData) => {
-        try {
-            const { error } = await supabase
-                .from(TABLES.CASH_SESSIONS)
-                .update({
-                    status: 'closed',
-                    closing_usd: closingData.usd || 0,
-                    closing_bs: closingData.bs || 0,
-                    expected_usd: closingData.expectedUsd || 0,
-                    expected_bs: closingData.expectedBs || 0,
-                    difference_usd: closingData.differenceUsd || 0,
-                    difference_bs: closingData.differenceBs || 0,
-                    closed_at: new Date().toISOString(),
-                    notes: closingData.notes || ''
-                })
-                .eq('id', sessionId);
-
-            if (error) throw error;
-            await fetchData();
-        } catch (error) {
-            console.error('Error closing cash session:', error);
-            throw error;
-        }
-    };
-
-    // ========== CASH TRANSACTIONS ==========
-    const addCashTransaction = async (transactionData) => {
-        try {
-            const { data, error } = await supabase
-                .from(TABLES.CASH_TRANSACTIONS)
-                .insert({
-                    ...transactionData,
-                    company_id: companyId,
-                    session_id: cashSession?.id,
-                    created_at: new Date().toISOString()
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error adding cash transaction:', error);
-            throw error;
-        }
-    };
-
-    // ========== AUTH REQUESTS ==========
-    const createAuthRequest = async (requestData) => {
-        try {
-            const { data, error } = await supabase
-                .from(TABLES.AUTH_REQUESTS)
-                .insert({
-                    ...requestData,
-                    company_id: companyId,
-                    status: 'pending',
-                    created_at: new Date().toISOString()
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error creating auth request:', error);
-            throw error;
-        }
-    };
-
-    const approveAuthRequest = async (requestId, approverName) => {
-        try {
-            const { error } = await supabase
-                .from(TABLES.AUTH_REQUESTS)
-                .update({
-                    status: 'approved',
-                    approved_by: approverName,
-                    approved_at: new Date().toISOString()
-                })
-                .eq('id', requestId);
-
-            if (error) throw error;
-            await fetchData();
-        } catch (error) {
-            console.error('Error approving auth request:', error);
-            throw error;
-        }
-    };
-
-    const rejectAuthRequest = async (requestId, reason) => {
-        try {
-            const { error } = await supabase
-                .from(TABLES.AUTH_REQUESTS)
-                .update({
-                    status: 'rejected',
-                    reason: reason
-                })
-                .eq('id', requestId);
-
-            if (error) throw error;
-            await fetchData();
-        } catch (error) {
-            console.error('Error rejecting auth request:', error);
-            throw error;
-        }
-    };
-
-    // ========== CREDIT NOTES ==========
-    const addCreditNote = async (creditNoteData) => {
-        try {
-            const { data, error } = await supabase
-                .from(TABLES.CREDIT_NOTES)
-                .insert({
-                    ...creditNoteData,
-                    company_id: companyId,
-                    created_at: new Date().toISOString()
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-            await fetchData();
-            return data;
-        } catch (error) {
-            console.error('Error adding credit note:', error);
-            throw error;
-        }
-    };
-
-    // ========== SALE PAYMENT PROCESSING ==========
-    const processSalePayment = async (saleId, paymentMethods, userId, userName, exchangeRate) => {
-        try {
-            // Calculate total payment
-            const totalPayment = paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0);
-
-            // Get current sale
-            const sale = sales.find(s => s.id === saleId);
-            if (!sale) throw new Error('Sale not found');
-
-            // Calculate new paid amount
-            const newPaidAmount = (sale.paid_amount || 0) + totalPayment;
-            const remaining = (sale.amount_usd || 0) - newPaidAmount;
-            const isPaid = remaining <= 0;
-
-            // Add payments
-            for (const pm of paymentMethods) {
-                await addPayment({
-                    sale_id: saleId,
-                    amount: pm.amount,
-                    currency: pm.currency,
-                    method: pm.method,
-                    reference: pm.reference || null,
-                    created_by: userId,
-                    created_by_name: userName
+        // Update sale paid amount
+        if (paymentData.sale_id) {
+            const sale = sales.find(s => s.id === paymentData.sale_id);
+            if (sale) {
+                const newPaidAmount = (sale.paid_amount || 0) + paymentData.amount;
+                const remaining = (sale.amount_usd || 0) - newPaidAmount;
+                await updateSale(sale.id, {
+                    paid_amount: newPaidAmount,
+                    remaining_amount: remaining,
+                    payment_status: remaining <= 0 ? 'paid' : 'partial'
                 });
             }
+        }
 
-            // Add cash transaction
-            await addCashTransaction({
-                type: 'sale',
-                description: `Pago ${sale.document_type} #${sale.document_number}`,
-                total_amount: totalPayment,
-                payments: paymentMethods,
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error adding payment:', error);
+        throw error;
+    }
+};
+
+// ========== CASH SESSIONS ==========
+const openCashSession = async (cashierData, openingAmounts) => {
+    try {
+        if (!companyId) {
+            console.error('âŒ Attempted to open cash session without companyId');
+            throw new Error('Error: No se ha identificado la empresa. Por favor recargue la pÃ¡gina.');
+        }
+
+        const { data, error } = await supabase
+            .from(TABLES.CASH_SESSIONS)
+            .insert({
+                company_id: companyId,
+                cashier_id: cashierData.id,
+                cashier_name: cashierData.name,
+                status: 'open',
+                opening_usd: openingAmounts.usd || 0,
+                opening_bs: openingAmounts.bs || 0,
+                opened_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error opening cash session:', error);
+        throw error;
+    }
+};
+
+const closeCashSession = async (sessionId, closingData) => {
+    try {
+        const { error } = await supabase
+            .from(TABLES.CASH_SESSIONS)
+            .update({
+                status: 'closed',
+                closing_usd: closingData.usd || 0,
+                closing_bs: closingData.bs || 0,
+                expected_usd: closingData.expectedUsd || 0,
+                expected_bs: closingData.expectedBs || 0,
+                difference_usd: closingData.differenceUsd || 0,
+                difference_bs: closingData.differenceBs || 0,
+                closed_at: new Date().toISOString(),
+                notes: closingData.notes || ''
+            })
+            .eq('id', sessionId);
+
+        if (error) throw error;
+        await fetchData();
+    } catch (error) {
+        console.error('Error closing cash session:', error);
+        throw error;
+    }
+};
+
+// ========== CASH TRANSACTIONS ==========
+const addCashTransaction = async (transactionData) => {
+    try {
+        const { data, error } = await supabase
+            .from(TABLES.CASH_TRANSACTIONS)
+            .insert({
+                ...transactionData,
+                company_id: companyId,
+                session_id: cashSession?.id,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error adding cash transaction:', error);
+        throw error;
+    }
+};
+
+// ========== AUTH REQUESTS ==========
+const createAuthRequest = async (requestData) => {
+    try {
+        const { data, error } = await supabase
+            .from(TABLES.AUTH_REQUESTS)
+            .insert({
+                ...requestData,
+                company_id: companyId,
+                status: 'pending',
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error creating auth request:', error);
+        throw error;
+    }
+};
+
+const approveAuthRequest = async (requestId, approverName) => {
+    try {
+        const { error } = await supabase
+            .from(TABLES.AUTH_REQUESTS)
+            .update({
+                status: 'approved',
+                approved_by: approverName,
+                approved_at: new Date().toISOString()
+            })
+            .eq('id', requestId);
+
+        if (error) throw error;
+        await fetchData();
+    } catch (error) {
+        console.error('Error approving auth request:', error);
+        throw error;
+    }
+};
+
+const rejectAuthRequest = async (requestId, reason) => {
+    try {
+        const { error } = await supabase
+            .from(TABLES.AUTH_REQUESTS)
+            .update({
+                status: 'rejected',
+                reason: reason
+            })
+            .eq('id', requestId);
+
+        if (error) throw error;
+        await fetchData();
+    } catch (error) {
+        console.error('Error rejecting auth request:', error);
+        throw error;
+    }
+};
+
+// ========== CREDIT NOTES ==========
+const addCreditNote = async (creditNoteData) => {
+    try {
+        const { data, error } = await supabase
+            .from(TABLES.CREDIT_NOTES)
+            .insert({
+                ...creditNoteData,
+                company_id: companyId,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        await fetchData();
+        return data;
+    } catch (error) {
+        console.error('Error adding credit note:', error);
+        throw error;
+    }
+};
+
+// ========== SALE PAYMENT PROCESSING ==========
+const processSalePayment = async (saleId, paymentMethods, userId, userName, exchangeRate) => {
+    try {
+        // Calculate total payment
+        const totalPayment = paymentMethods.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+        // Get current sale
+        const sale = sales.find(s => s.id === saleId);
+        if (!sale) throw new Error('Sale not found');
+
+        // Calculate new paid amount
+        const newPaidAmount = (sale.paid_amount || 0) + totalPayment;
+        const remaining = (sale.amount_usd || 0) - newPaidAmount;
+        const isPaid = remaining <= 0;
+
+        // Add payments
+        for (const pm of paymentMethods) {
+            await addPayment({
                 sale_id: saleId,
+                amount: pm.amount,
+                currency: pm.currency,
+                method: pm.method,
+                reference: pm.reference || null,
                 created_by: userId,
                 created_by_name: userName
             });
-
-            return { success: true, isPaid };
-        } catch (error) {
-            console.error('Error processing sale payment:', error);
-            throw error;
         }
-    };
 
-    // Return all states and functions
-    return {
-        // Data
-        products,
-        movements,
-        purchases,
-        providers,
-        brands,
-        categories,
-        sales,
-        customers,
-        loading,
-        cashSession,
-        cashTransactions,
-        authRequests,
-        creditNotes,
+        // Add cash transaction
+        await addCashTransaction({
+            type: 'sale',
+            description: `Pago ${sale.document_type} #${sale.document_number}`,
+            total_amount: totalPayment,
+            payments: paymentMethods,
+            sale_id: saleId,
+            created_by: userId,
+            created_by_name: userName
+        });
 
-        // Refresh
-        refreshData: fetchData,
+        return { success: true, isPaid };
+    } catch (error) {
+        console.error('Error processing sale payment:', error);
+        throw error;
+    }
+};
 
-        // Product functions
-        addProduct,
-        updateProduct,
-        deleteProduct,
-        deleteProductsBatch,
-        addProductsBatch,
+// Return all states and functions
+return {
+    // Data
+    products,
+    movements,
+    purchases,
+    providers,
+    brands,
+    categories,
+    sales,
+    customers,
+    loading,
+    cashSession,
+    cashTransactions,
+    authRequests,
+    creditNotes,
 
-        // Provider functions
-        addProvider,
-        getOrCreateProvider,
+    // Refresh
+    refreshData: fetchData,
 
-        // Brand functions
-        addBrand,
-        getOrCreateBrand,
+    // Product functions
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    deleteProductsBatch,
+    addProductsBatch,
 
-        // Category functions
-        addCategory,
-        getOrCreateCategory,
+    // Provider functions
+    addProvider,
+    getOrCreateProvider,
 
-        // Sale functions
-        addSale,
-        addSalesBatch,
-        updateSale,
-        deleteSale,
+    // Brand functions
+    addBrand,
+    getOrCreateBrand,
+    updateBrand,
+    deleteBrand,
 
-        // Movement functions
-        addMovement,
-        updateMovement,
-        approveMovement,
-        rejectMovement,
-        getProductMovementHistory,
+    // Category functions
+    addCategory,
+    getOrCreateCategory,
 
-        // Provider functions
-        addProvider,
-        updateProvider,
-        getOrCreateProvider,
+    // Sale functions
+    addSale,
+    addSalesBatch,
+    updateSale,
+    deleteSale,
 
-        // Purchase functions
-        addPurchase,
+    // Movement functions
+    addMovement,
+    updateMovement,
+    approveMovement,
+    rejectMovement,
+    getProductMovementHistory,
 
-        // Customer functions
-        addCustomer,
-        updateCustomer,
+    // Provider functions
+    addProvider,
+    updateProvider,
+    getOrCreateProvider,
 
-        // Payment functions
-        addPayment,
-        processSalePayment,
+    // Purchase functions
+    addPurchase,
 
-        // Cash session functions
-        openCashSession,
-        closeCashSession,
+    // Customer functions
+    addCustomer,
+    updateCustomer,
 
-        // Cash transaction functions
-        addCashTransaction,
+    // Payment functions
+    addPayment,
+    processSalePayment,
 
-        // Auth request functions
-        createAuthRequest,
-        approveAuthRequest,
-        rejectAuthRequest,
+    // Cash session functions
+    openCashSession,
+    closeCashSession,
 
-        // Credit note functions
-        addCreditNote
-    };
+    // Cash transaction functions
+    addCashTransaction,
+
+    // Auth request functions
+    createAuthRequest,
+    approveAuthRequest,
+    rejectAuthRequest,
+
+    // Credit note functions
+    addCreditNote
+};
 };

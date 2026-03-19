@@ -169,7 +169,7 @@ const ProductSearch = ({ productos, onAgregarProducto }) => {
                                                 padding: '0.75rem 1rem',
                                                 textAlign: 'right',
                                                 fontWeight: 'bold',
-                                                color: 'var(--success)'
+                                                color: '#059669'
                                             }}>
                                                 ${(producto.price || 0).toFixed(2)}
                                             </td>
